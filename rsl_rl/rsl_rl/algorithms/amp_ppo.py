@@ -113,6 +113,7 @@ class AMPPPO:
         self.actor_critic.train()
 
     def act(self, obs, critic_obs, amp_obs):
+        "根据传入的观测(obs 和 critic_obs)以及 AMP 数据(amp_obs),使用策略网络计算动作及相关统计量，并保存到 transition 中。"
         if self.actor_critic.is_recurrent:
             self.transition.hidden_states = self.actor_critic.get_hidden_states()
         # Compute the actions and values
@@ -129,6 +130,7 @@ class AMPPPO:
         return self.transition.actions
     
     def process_env_step(self, rewards, dones, infos, amp_obs):
+        "处理环境一步返回的数据，并将这一转换存储到 PPO 的轨迹存储器中，同时更新 AMP 回放缓冲区。"
         self.transition.rewards = rewards.clone()
         self.transition.dones = dones
         # Bootstrapping on time outs
@@ -151,17 +153,20 @@ class AMPPPO:
         self.storage.compute_returns(last_values, self.gamma, self.lam)
 
     def update(self):
+        "这是代码中最核心的更新部分，实现了 PPO 以及 AMP 判别器的联合更新。"
         mean_value_loss = 0
         mean_surrogate_loss = 0
         mean_amp_loss = 0
         mean_grad_pen_loss = 0
         mean_policy_pred = 0
         mean_expert_pred = 0
+
+        # minibatch生成，数据是网络observation等
         if self.actor_critic.is_recurrent:
             generator = self.storage.reccurent_mini_batch_generator(self.num_mini_batches, self.num_learning_epochs)
         else:
             generator = self.storage.mini_batch_generator(self.num_mini_batches, self.num_learning_epochs)
-
+        # 
         amp_policy_generator = self.amp_storage.feed_forward_generator(
             self.num_learning_epochs * self.num_mini_batches,
             self.storage.num_envs * self.storage.num_transitions_per_env //
@@ -174,16 +179,21 @@ class AMPPPO:
 
                 obs_batch, critic_obs_batch, actions_batch, target_values_batch, advantages_batch, returns_batch, old_actions_log_prob_batch, \
                     old_mu_batch, old_sigma_batch, hid_states_batch, masks_batch = sample
+                
+                # 前向计算与计算概率
                 aug_obs_batch = obs_batch.detach()
                 self.actor_critic.act(aug_obs_batch, masks=masks_batch, hidden_states=hid_states_batch[0])
                 actions_log_prob_batch = self.actor_critic.get_actions_log_prob(actions_batch)
+
+                # 利用 critic 部分计算状态值，同时获取当前策略网络输出的均值、标准差和动作熵（熵项通常用于鼓励策略多样性）。这里的 mu 和 sigma 是策略网络输出的均值和标准差。
                 aug_critic_obs_batch = critic_obs_batch.detach()
                 value_batch = self.actor_critic.evaluate(aug_critic_obs_batch, masks=masks_batch, hidden_states=hid_states_batch[1])
                 mu_batch = self.actor_critic.action_mean
                 sigma_batch = self.actor_critic.action_std
                 entropy_batch = self.actor_critic.entropy
 
-                # KL
+                # 如果设置了自适应调度（schedule == 'adaptive'）且给定目标 KL 散度（desired_kl），在不计算梯度的模式下（torch.inference_mode()）计算当前策略与旧策略之间的 KL 散度。
+                # 根据平均 KL 值与目标值的比例，调整学习率，并更新优化器中所有参数组的学习率。
                 if self.desired_kl != None and self.schedule == 'adaptive':
                     with torch.inference_mode():
                         kl = torch.sum(
@@ -219,6 +229,10 @@ class AMPPPO:
                 # Discriminator loss.
                 policy_state, policy_next_state = sample_amp_policy
                 expert_state, expert_next_state = sample_amp_expert
+                # print('policy_state', policy_state.shape)
+                # print('policy_next_state', policy_next_state.shape)
+                # print('expert_state', expert_state.shape)
+                # print('expert_next_state', expert_next_state.shape)
                 if self.amp_normalizer is not None:
                     with torch.no_grad():
                         policy_state = self.amp_normalizer.normalize_torch(policy_state, self.device)
@@ -245,11 +259,31 @@ class AMPPPO:
                     self.entropy_coef * entropy_batch.mean() +
                     amp_loss + grad_pen_loss)
 
+                # Add before optimizer.zero_grad()
+                for name, param in self.actor_critic.named_parameters():
+                    if torch.isnan(param).any() or torch.isinf(param).any():
+                        print(f"NaN or Inf in parameter {name}")
+                        param.data = torch.nan_to_num(param.data)
+
                 # Gradient step
                 self.optimizer.zero_grad()
                 loss.backward()
+
+                # Check gradients for NaN
+                for name, param in self.actor_critic.named_parameters():
+                    if param.grad is not None and (torch.isnan(param.grad).any() or torch.isinf(param.grad).any()):
+                        print(f"NaN or Inf in gradient of {name}")
+                        param.grad = torch.nan_to_num(param.grad)
+
+                # Increase gradient clipping to handle potential large values
                 nn.utils.clip_grad_norm_(self.actor_critic.parameters(), self.max_grad_norm)
                 self.optimizer.step()
+
+                # After optimizer.step(), check parameters again
+                for name, param in self.actor_critic.named_parameters():
+                    if torch.isnan(param).any() or torch.isinf(param).any():
+                        print(f"NaN or Inf in parameter {name} after optimization step")
+                        param.data = torch.nan_to_num(param.data)
 
                 if not self.actor_critic.fixed_std and self.min_std is not None:
                     self.actor_critic.std.data = self.actor_critic.std.data.clamp(min=self.min_std)

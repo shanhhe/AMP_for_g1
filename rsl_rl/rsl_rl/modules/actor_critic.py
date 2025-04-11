@@ -120,8 +120,27 @@ class ActorCritic(nn.Module):
         return self.distribution.entropy().sum(dim=-1)
 
     def update_distribution(self, observations):
+        # Check for NaNs in observations
+        if torch.isnan(observations).any() or torch.isinf(observations).any():
+            print("Observations contains NaN or Inf before actor network")
+            observations = torch.nan_to_num(observations)
+
         mean = self.actor(observations)
+        # Check for NaNs in mean
+        if torch.isnan(mean).any() or torch.isinf(mean).any():
+            print("NaN or Inf detected in action mean after actor network!")
+            # Replace NaNs with zeros
+            mean = torch.nan_to_num(mean)
+        
         std = self.std.to(mean.device)
+        # Check for NaNs in std
+        if torch.isnan(std).any() or torch.isinf(std).any():
+            print("NaN or Inf detected in std!")
+            std = torch.nan_to_num(std, nan=0.01, posinf=1.0, neginf=0.01)  # Replace with reasonable values
+        
+        # Make sure std is positive
+        std = torch.clamp(std, min=1e-6)
+        
         self.distribution = Normal(mean, mean*0. + std)
 
     def act(self, observations, **kwargs):

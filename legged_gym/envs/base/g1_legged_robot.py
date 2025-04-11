@@ -46,20 +46,21 @@ from legged_gym.envs.base.base_task import BaseTask
 from legged_gym.utils.terrain import Terrain
 from legged_gym.utils.math import quat_apply_yaw, wrap_to_pi, torch_rand_sqrt_float
 from legged_gym.utils.helpers import class_to_dict
-from .legged_robot_config import LeggedRobotCfg
+from .g1_legged_robot_config import G1LeggedRobotCfg
 from rsl_rl.datasets.g1_motion_loader import AMPLoader
+import random
 
 
-COM_OFFSET = torch.tensor([0.012731, 0.002186, 0.000515])
+# Define G1 offsets based on the URDF
+PELVIS_OFFSET = torch.tensor([0.0, 0.0, -0.07605])  # from pelvis inertial origin
 HIP_OFFSETS = torch.tensor([
-    [0.183, 0.047, 0.],
-    [0.183, -0.047, 0.],
-    [-0.183, 0.047, 0.],
-    [-0.183, -0.047, 0.]]) + COM_OFFSET
+    [0.0, 0.064452, -0.1027],  # left_hip
+    [0.0, -0.064452, -0.1027]  # right_hip
+]) + PELVIS_OFFSET
 
 
 class G1LeggedRobot(BaseTask):
-    def __init__(self, cfg: LeggedRobotCfg, sim_params, physics_engine, sim_device, headless):
+    def __init__(self, cfg: G1LeggedRobotCfg, sim_params, physics_engine, sim_device, headless):
         """ Parses the provided config file,
             calls create_sim() (which creates, simulation, terrain and environments),
             initilizes pytorch buffers used during training
@@ -86,6 +87,7 @@ class G1LeggedRobot(BaseTask):
         self._prepare_reward_function()
         self.init_done = True
 
+        # 这里data仅用来reset
         if self.cfg.env.reference_state_initialization:
             self.amp_loader = AMPLoader(motion_files=self.cfg.env.amp_motion_files, device=self.device, time_between_frames=self.dt)
 
@@ -105,8 +107,18 @@ class G1LeggedRobot(BaseTask):
         Args:
             actions (torch.Tensor): Tensor of shape (num_envs, num_actions_per_env)
         """
+
+        # Debug step
+        if torch.isnan(actions).any().item():
+            print("  Actions contains NaN:")
+
         clip_actions = self.cfg.normalization.clip_actions
         self.actions = torch.clip(actions, -clip_actions, clip_actions).to(self.device)
+
+        # More debug
+        if torch.isnan(self.actions).any().item():
+            print("  After clipping - Actions contains NaN:")
+        
         # step physics and render each frame
         self.render()
         for _ in range(self.cfg.control.decimation):
@@ -146,6 +158,11 @@ class G1LeggedRobot(BaseTask):
         """
         self.gym.refresh_actor_root_state_tensor(self.sim)
         self.gym.refresh_net_contact_force_tensor(self.sim)
+
+        # Check root states for NaNs
+        if torch.isnan(self.root_states).any():
+            print("NaN in root_states after physics step!")
+            self.root_states = torch.nan_to_num(self.root_states)
 
         self.episode_length_buf += 1
         self.common_step_counter += 1
@@ -259,6 +276,33 @@ class G1LeggedRobot(BaseTask):
     def compute_observations(self):
         """ Computes observations
         """
+        if torch.isnan(self.base_lin_vel).any():
+            print("NaN in base_lin_vel")
+            self.base_lin_vel = torch.nan_to_num(self.base_lin_vel)
+            
+        if torch.isnan(self.base_ang_vel).any():
+            print("NaN in base_ang_vel")
+            self.base_ang_vel = torch.nan_to_num(self.base_ang_vel)
+            
+        if torch.isnan(self.projected_gravity).any():
+            print("NaN in projected_gravity")
+            self.projected_gravity = torch.nan_to_num(self.projected_gravity)
+        
+        if torch.isnan(self.commands).any():
+            print("NaN in commands")
+            self.commands = torch.nan_to_num(self.commands)
+        
+        if torch.isnan(self.dof_pos).any():
+            print("NaN in dof_pos")
+            self.dof_pos = torch.nan_to_num(self.dof_pos)
+            
+        if torch.isnan(self.dof_vel).any():
+            print("NaN in dof_vel")
+            self.dof_vel = torch.nan_to_num(self.dof_vel)
+            
+        if torch.isnan(self.actions).any():
+            print("NaN in actions")
+            self.actions = torch.nan_to_num(self.actions)
         self.privileged_obs_buf = torch.cat((  self.base_lin_vel * self.obs_scales.lin_vel,
                                     self.base_ang_vel  * self.obs_scales.ang_vel,
                                     self.projected_gravity,
@@ -267,6 +311,10 @@ class G1LeggedRobot(BaseTask):
                                     self.dof_vel * self.obs_scales.dof_vel,
                                     self.actions
                                     ),dim=-1)
+        # Add to compute_observations method
+        if torch.isnan(self.privileged_obs_buf).any():
+            print("NaN detected in privileged_obs_buf!")
+            self.privileged_obs_buf = torch.nan_to_num(self.privileged_obs_buf)
         # add perceptive inputs if not blind
         if self.cfg.terrain.measure_heights:
             heights = torch.clip(self.root_states[:, 2].unsqueeze(1) - 0.5 - self.measured_heights, -1, 1.) * self.obs_scales.height_measurements
@@ -282,18 +330,25 @@ class G1LeggedRobot(BaseTask):
         else:
             self.obs_buf = torch.clone(self.privileged_obs_buf)
 
+        
+
     def get_amp_observations(self):
-        joint_pos = self.dof_pos
-        foot_pos = self.foot_positions_in_base_frame(self.dof_pos).to(self.device)
-        base_lin_vel = self.base_lin_vel
-        base_ang_vel = self.base_ang_vel
-        joint_vel = self.dof_vel
-        z_pos = self.root_states[:, 2:3]
-        return torch.cat((joint_pos, foot_pos, base_lin_vel, base_ang_vel, joint_vel, z_pos), dim=-1)
+        """ Get AMP observations
+        """
+        # 29 + 6 + 3 + 3 + 29 + 1 = 71
+        joint_pos = self.dof_pos # 29
+        # foot_pos = self.foot_positions_in_pelvis_frame(self.dof_pos).to(self.device) # 6
+        base_lin_vel = self.base_lin_vel # 3
+        base_ang_vel = self.base_ang_vel # 3
+        joint_vel = self.dof_vel # 29
+        z_pos = self.root_states[:, 2:3] # 1
+        # return torch.cat((joint_pos, foot_pos, base_lin_vel, base_ang_vel, joint_vel, z_pos), dim=-1)
+        return torch.cat((joint_pos, base_lin_vel, base_ang_vel, joint_vel, z_pos), dim=-1)
 
     def create_sim(self):
         """ Creates simulation, terrain and evironments
         """
+        print("Creating simulation")
         self.up_axis_idx = 2 # 2 for z, 1 for y -> adapt gravity accordingly
         self.sim = self.gym.create_sim(self.sim_device_id, self.graphics_device_id, self.physics_engine, self.sim_params)
         mesh_type = self.cfg.terrain.mesh_type
@@ -473,6 +528,10 @@ class G1LeggedRobot(BaseTask):
             env_ids (List[int]): Environemnt ids
             frames: AMP frames to initialize motion with
         """
+        # Check frames for NaNs
+        if torch.isnan(frames).any():
+            print("NaN in AMP frames!")
+            frames = torch.nan_to_num(frames)
         self.dof_pos[env_ids] = AMPLoader.get_joint_pose_batch(frames)
         self.dof_vel[env_ids] = AMPLoader.get_joint_vel_batch(frames)
         env_ids_int32 = env_ids.to(dtype=torch.int32)
@@ -602,8 +661,8 @@ class G1LeggedRobot(BaseTask):
         self.gym.refresh_net_contact_force_tensor(self.sim)
 
         # create some wrapper tensors for different slices
-        self.root_states = gymtorch.wrap_tensor(actor_root_state)
-        self.dof_state = gymtorch.wrap_tensor(dof_state_tensor)
+        self.root_states = gymtorch.wrap_tensor(actor_root_state) # shape: num_envs, 13 (x, y, z, quat, lin_vel, ang_vel)
+        self.dof_state = gymtorch.wrap_tensor(dof_state_tensor) # shape: num_envs, num_dof, 2 (pos, vel)
         self.dof_pos = self.dof_state.view(self.num_envs, self.num_dof, 2)[..., 0]
         self.dof_vel = self.dof_state.view(self.num_envs, self.num_dof, 2)[..., 1]
         self.base_quat = self.root_states[:, 3:7]
@@ -611,10 +670,12 @@ class G1LeggedRobot(BaseTask):
         self.contact_forces = gymtorch.wrap_tensor(net_contact_forces).view(self.num_envs, -1, 3) # shape: num_envs, num_bodies, xyz axis
 
         # initialize some data used later on
-        self.common_step_counter = 0
+        self.common_step_counter = 0 # counter used to update the curriculum
         self.extras = {}
         self.noise_scale_vec = self._get_noise_scale_vec(self.cfg)
+        # 获取重力方向参数（例如 -1 表示重力方向），并复制到所有环境上。
         self.gravity_vec = to_torch(get_axis_params(-1., self.up_axis_idx), device=self.device).repeat((self.num_envs, 1))
+        # 获取前向方向参数（例如 1 表示前向方向），并复制到所有环境上。
         self.forward_vec = to_torch([1., 0., 0.], device=self.device).repeat((self.num_envs, 1))
         self.torques = torch.zeros(self.num_envs, self.num_actions, dtype=torch.float, device=self.device, requires_grad=False)
         self.p_gains = torch.zeros(self.num_actions, dtype=torch.float, device=self.device, requires_grad=False)
@@ -631,6 +692,7 @@ class G1LeggedRobot(BaseTask):
         self.base_ang_vel = quat_rotate_inverse(self.base_quat, self.root_states[:, 10:13])
         self.projected_gravity = quat_rotate_inverse(self.base_quat, self.gravity_vec)
         if self.cfg.terrain.measure_heights:
+            # 初始化用于存储测量高度的张量
             self.height_points = self._init_height_points()
         self.measured_heights = 0
 
@@ -651,6 +713,7 @@ class G1LeggedRobot(BaseTask):
                 self.d_gains[i] = 0.
                 if self.cfg.control.control_type in ["P", "V"]:
                     print(f"PD gain of joint {name} were not defined, setting them to zero")
+        # 关节角度张量增加一维，以便与环境数量一致
         self.default_dof_pos = self.default_dof_pos.unsqueeze(0)
 
         if self.cfg.domain_rand.randomize_gains:
@@ -671,30 +734,85 @@ class G1LeggedRobot(BaseTask):
         return p_mult * self.p_gains, d_mult * self.d_gains
 
 
-    def foot_position_in_hip_frame(self, angles, l_hip_sign=1):
-        theta_ab, theta_hip, theta_knee = angles[:, 0], angles[:, 1], angles[:, 2]
-        l_up = 0.2
-        l_low = 0.2
-        l_hip = 0.08505 * l_hip_sign
-        leg_distance = torch.sqrt(l_up**2 + l_low**2 +
-                                2 * l_up * l_low * torch.cos(theta_knee))
-        eff_swing = theta_hip + theta_knee / 2
+    def foot_position_in_hip_frame(self, angles, leg_index):
+        """
+        Calculate foot position in hip frame for G1 robot
+        
+        Args:
+            angles: joint angles tensor - organized as 
+                [hip_pitch, hip_roll, hip_yaw, knee, ankle_pitch, ankle_roll]
+            leg_index: 0 for left leg, 1 for right leg
+        """
+        # Extract joint angles
+        hip_pitch = angles[:, 0]
+        hip_roll = angles[:, 1]
+        hip_yaw = angles[:, 2]
+        knee = angles[:, 3]
+        ankle_pitch = angles[:, 4]
+        ankle_roll = angles[:, 5]
+        
+        # Link lengths from URDF
+        l_hip_to_yaw = 0.12412  # Distance from hip_roll to hip_yaw
+        l_yaw_to_knee = 0.17734  # Distance from hip_yaw to knee
+        l_knee_to_ankle = 0.30001  # Distance from knee to ankle
+        l_ankle_to_foot = 0.03  # Approximate distance from ankle to foot
+        
+        # Compute intermediate transformations using forward kinematics
+        # These are simplified calculations - a complete solution would use transformation matrices
+        
+        # Start with hip position
+        hip_pos = HIP_OFFSETS[leg_index].clone().to(self.device)
+        
+        # Transform through hip_pitch
+        hip_pitch_pos = torch.zeros_like(hip_pos).unsqueeze(0).repeat(angles.shape[0], 1)
+        hip_pitch_pos[:, 2] = -l_hip_to_yaw * torch.sin(hip_pitch)
+        hip_pitch_pos[:, 1] = 0.052 if leg_index == 0 else -0.052  # From URDF hip_pitch to hip_roll link
+        
+        # Transform through hip_roll and hip_yaw
+        hip_yaw_pos = torch.zeros_like(hip_pos).unsqueeze(0).repeat(angles.shape[0], 1)
+        hip_yaw_pos[:, 2] = -l_yaw_to_knee * torch.cos(hip_roll)
+        
+        # Transform through knee
+        knee_pos = torch.zeros_like(hip_pos).unsqueeze(0).repeat(angles.shape[0], 1)
+        knee_pos[:, 2] = -l_knee_to_ankle * torch.cos(knee)
+        
+        # Transform through ankle
+        ankle_pos = torch.zeros_like(hip_pos).unsqueeze(0).repeat(angles.shape[0], 1)
+        ankle_pos[:, 2] = -l_ankle_to_foot * torch.cos(ankle_pitch)
+        
+        # Sum all positions to get foot position in hip frame
+        foot_pos = hip_pitch_pos + hip_yaw_pos + knee_pos + ankle_pos
+        
+        return foot_pos
 
-        off_x_hip = -leg_distance * torch.sin(eff_swing)
-        off_z_hip = -leg_distance * torch.cos(eff_swing)
-        off_y_hip = l_hip
-
-        off_x = off_x_hip
-        off_y = torch.cos(theta_ab) * off_y_hip - torch.sin(theta_ab) * off_z_hip
-        off_z = torch.sin(theta_ab) * off_y_hip + torch.cos(theta_ab) * off_z_hip
-        return torch.stack([off_x, off_y, off_z], dim=-1)
-
-    def foot_positions_in_base_frame(self, foot_angles):
-        foot_positions = torch.zeros_like(foot_angles)
-        for i in range(4):
-            foot_positions[:, i * 3:i * 3 + 3].copy_(
-                self.foot_position_in_hip_frame(foot_angles[:, i * 3: i * 3 + 3], l_hip_sign=(-1)**(i)))
-        foot_positions = foot_positions + HIP_OFFSETS.reshape(12,).to(self.device)
+    def foot_positions_in_pelvis_frame(self, joint_angles):
+        """
+        Calculate foot positions in pelvis frame for G1 robot
+        
+        Args:
+            joint_angles: All joint angles tensor
+            
+        Returns:
+            Foot positions in pelvis frame
+        """
+        foot_positions = torch.zeros((joint_angles.shape[0], 6), device=self.device)
+        
+        # G1 has only 2 legs (left and right), each with 6 DOFs for leg joints
+        for i in range(2):
+            # Extract relevant joint angles for each leg (6 per leg)
+            leg_start_idx = i * 6  # Adjust this based on your joint angles order
+            leg_angles = joint_angles[:, leg_start_idx:leg_start_idx+6]
+            
+            # Calculate foot position for this leg
+            foot_pos = self.foot_position_in_hip_frame(leg_angles, i)
+            
+            # Transform from hip frame to pelvis frame
+            hip_pos_in_pelvis = HIP_OFFSETS[i].to(self.device)
+            foot_pos_in_pelvis = foot_pos + hip_pos_in_pelvis
+            
+            # Store in result tensor
+            foot_positions[:, i*3:(i+1)*3] = foot_pos_in_pelvis
+        
         return foot_positions
 
     def _prepare_reward_function(self):
@@ -702,7 +820,7 @@ class G1LeggedRobot(BaseTask):
             Looks for self._reward_<REWARD_NAME>, where <REWARD_NAME> are names of all non zero reward scales in the cfg.
         """
         # remove zero scales + multiply non-zero ones by dt
-        for key in list(self.reward_scales.keys()):
+        for key in list(self.reward_scales.keys()): #  class_to_dict(self.cfg.rewards.scales)
             scale = self.reward_scales[key]
             if scale==0:
                 self.reward_scales.pop(key) 
@@ -712,6 +830,7 @@ class G1LeggedRobot(BaseTask):
         self.reward_functions = []
         self.reward_names = []
         for name, scale in self.reward_scales.items():
+            # “终止奖励”单独处理
             if name=="termination":
                 continue
             self.reward_names.append(name)
@@ -719,6 +838,7 @@ class G1LeggedRobot(BaseTask):
             self.reward_functions.append(getattr(self, name))
 
         # reward episode sums
+        # 创建了一个字典 episode_sums，字典的键为 reward_scales 中剩余的奖励名称。
         self.episode_sums = {name: torch.zeros(self.num_envs, dtype=torch.float, device=self.device, requires_grad=False)
                              for name in self.reward_scales.keys()}
 
@@ -779,6 +899,9 @@ class G1LeggedRobot(BaseTask):
         asset_path = self.cfg.asset.file.format(LEGGED_GYM_ROOT_DIR=LEGGED_GYM_ROOT_DIR)
         asset_root = os.path.dirname(asset_path)
         asset_file = os.path.basename(asset_path)
+        print(f"Loading asset from {asset_path}")
+        print(f"Asset root: {asset_root}")
+        print(f"Asset file: {asset_file}")
 
         asset_options = gymapi.AssetOptions()
         asset_options.default_dof_drive_mode = self.cfg.asset.default_dof_drive_mode
@@ -797,7 +920,9 @@ class G1LeggedRobot(BaseTask):
 
         robot_asset = self.gym.load_asset(self.sim, asset_root, asset_file, asset_options)
         self.num_dof = self.gym.get_asset_dof_count(robot_asset)
+        print(f"Number of DOFs: {self.num_dof}")
         self.num_bodies = self.gym.get_asset_rigid_body_count(robot_asset)
+        print(f"Number of bodies: {self.num_bodies}")
         dof_props_asset = self.gym.get_asset_dof_properties(robot_asset)
         rigid_shape_props_asset = self.gym.get_asset_rigid_shape_properties(robot_asset)
 
@@ -807,6 +932,7 @@ class G1LeggedRobot(BaseTask):
         self.num_bodies = len(body_names)
         self.num_dofs = len(self.dof_names)
         feet_names = [s for s in body_names if self.cfg.asset.foot_name in s]
+        knee_names = [s for s in body_names if self.cfg.asset.knee_name in s]
         penalized_contact_names = []
         for name in self.cfg.asset.penalize_contacts_on:
             penalized_contact_names.extend([s for s in body_names if name in s])
@@ -818,6 +944,7 @@ class G1LeggedRobot(BaseTask):
         self.base_init_state = to_torch(base_init_state_list, device=self.device, requires_grad=False)
         start_pose = gymapi.Transform()
         start_pose.p = gymapi.Vec3(*self.base_init_state[:3])
+        print(f"Base init state: {self.base_init_state[:3]}")
 
         self._get_env_origins()
         env_lower = gymapi.Vec3(0., 0., 0.)
@@ -829,23 +956,27 @@ class G1LeggedRobot(BaseTask):
             env_handle = self.gym.create_env(self.sim, env_lower, env_upper, int(np.sqrt(self.num_envs)))
             pos = self.env_origins[i].clone()
             pos[:2] += torch_rand_float(-1., 1., (2,1), device=self.device).squeeze(1)
+            print(f"Creating env {i} at {pos}")
             start_pose.p = gymapi.Vec3(*pos)
                 
             rigid_shape_props = self._process_rigid_shape_props(rigid_shape_props_asset, i)
             self.gym.set_asset_rigid_shape_properties(robot_asset, rigid_shape_props)
-            anymal_handle = self.gym.create_actor(env_handle, robot_asset, start_pose, "anymal", i, self.cfg.asset.self_collisions, 0)
+            actor_handle = self.gym.create_actor(env_handle, robot_asset, start_pose, self.cfg.asset.name, i, self.cfg.asset.self_collisions, 0)
             dof_props = self._process_dof_props(dof_props_asset, i)
-            self.gym.set_actor_dof_properties(env_handle, anymal_handle, dof_props)
-            body_props = self.gym.get_actor_rigid_body_properties(env_handle, anymal_handle)
+            self.gym.set_actor_dof_properties(env_handle, actor_handle, dof_props)
+            body_props = self.gym.get_actor_rigid_body_properties(env_handle, actor_handle)
             body_props = self._process_rigid_body_props(body_props, i)
-            self.gym.set_actor_rigid_body_properties(env_handle, anymal_handle, body_props, recomputeInertia=True)
+            self.gym.set_actor_rigid_body_properties(env_handle, actor_handle, body_props, recomputeInertia=True)
             self.envs.append(env_handle)
-            self.actor_handles.append(anymal_handle)
-
+            self.actor_handles.append(actor_handle)
+            
+        self.dof_dict = self.gym.get_actor_dof_dict(self.envs[0], self.actor_handles[0])
+        self.knee_indices = torch.zeros(len(knee_names), dtype=torch.long, device=self.device, requires_grad=False)
         self.feet_indices = torch.zeros(len(feet_names), dtype=torch.long, device=self.device, requires_grad=False)
         for i in range(len(feet_names)):
             self.feet_indices[i] = self.gym.find_actor_rigid_body_handle(self.envs[0], self.actor_handles[0], feet_names[i])
-
+        for i in range(len(knee_names)):
+            self.knee_indices[i] = self.gym.find_actor_rigid_body_handle(self.envs[0], self.actor_handles[0], knee_names[i])
         self.penalised_contact_indices = torch.zeros(len(penalized_contact_names), dtype=torch.long, device=self.device, requires_grad=False)
         for i in range(len(penalized_contact_names)):
             self.penalised_contact_indices[i] = self.gym.find_actor_rigid_body_handle(self.envs[0], self.actor_handles[0], penalized_contact_names[i])
@@ -880,6 +1011,7 @@ class G1LeggedRobot(BaseTask):
             self.env_origins[:, 0] = spacing * xx.flatten()[:self.num_envs]
             self.env_origins[:, 1] = spacing * yy.flatten()[:self.num_envs]
             self.env_origins[:, 2] = 0.
+            # self.env_origins[:, 2] = self.cfg.init_state.pos[2]
 
     def _parse_cfg(self, cfg):
         self.dt = self.cfg.control.decimation * self.sim_params.dt

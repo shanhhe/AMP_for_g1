@@ -283,12 +283,13 @@ class LeggedRobot(BaseTask):
             self.obs_buf = torch.clone(self.privileged_obs_buf)
 
     def get_amp_observations(self):
-        joint_pos = self.dof_pos
-        foot_pos = self.foot_positions_in_base_frame(self.dof_pos).to(self.device)
-        base_lin_vel = self.base_lin_vel
-        base_ang_vel = self.base_ang_vel
-        joint_vel = self.dof_vel
-        z_pos = self.root_states[:, 2:3]
+        # 12 + 3 + 3 + 12 + 12 + 1 = 43
+        joint_pos = self.dof_pos # 12
+        foot_pos = self.foot_positions_in_base_frame(self.dof_pos).to(self.device) # 12
+        base_lin_vel = self.base_lin_vel # 3
+        base_ang_vel = self.base_ang_vel # 3
+        joint_vel = self.dof_vel # 12
+        z_pos = self.root_states[:, 2:3] # 1
         return torch.cat((joint_pos, foot_pos, base_lin_vel, base_ang_vel, joint_vel, z_pos), dim=-1)
 
     def create_sim(self):
@@ -842,6 +843,7 @@ class LeggedRobot(BaseTask):
             self.envs.append(env_handle)
             self.actor_handles.append(anymal_handle)
 
+        self.dof_dict = self.gym.get_actor_dof_dict(self.envs[0], self.actor_handles[0])
         self.feet_indices = torch.zeros(len(feet_names), dtype=torch.long, device=self.device, requires_grad=False)
         for i in range(len(feet_names)):
             self.feet_indices[i] = self.gym.find_actor_rigid_body_handle(self.envs[0], self.actor_handles[0], feet_names[i])

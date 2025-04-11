@@ -44,5 +44,5 @@ from legged_gym.utils.task_registry import task_registry
 
 task_registry.register( "a1", LeggedRobot, A1RoughCfg(), A1RoughCfgPPO() )
 task_registry.register( "a1_amp", LeggedRobot, A1AMPCfg(), A1AMPCfgPPO() )
-task_registry.register( "g1_amp", G1LeggedRobot, G1AMPCfg(), G1AMPCfgPPO() )
+task_registry.register( "g1_amp", G1AMPRobot, G1AMPCfg(), G1AMPCfgPPO() )
 

@@ -18,34 +18,34 @@ class AMPLoader:
     ROT_SIZE = 4
     JOINT_POS_SIZE = 12
     TAR_TOE_POS_LOCAL_SIZE = 12
-    LINEAR_VEL_SIZE = 3
+    LINEAR_VEL_SIZE = 3 
     ANGULAR_VEL_SIZE = 3
     JOINT_VEL_SIZE = 12
     TAR_TOE_VEL_LOCAL_SIZE = 12
 
     ROOT_POS_START_IDX = 0
-    ROOT_POS_END_IDX = ROOT_POS_START_IDX + POS_SIZE
+    ROOT_POS_END_IDX = ROOT_POS_START_IDX + POS_SIZE # 3
 
-    ROOT_ROT_START_IDX = ROOT_POS_END_IDX
-    ROOT_ROT_END_IDX = ROOT_ROT_START_IDX + ROT_SIZE
+    ROOT_ROT_START_IDX = ROOT_POS_END_IDX # 3
+    ROOT_ROT_END_IDX = ROOT_ROT_START_IDX + ROT_SIZE  # 7
 
-    JOINT_POSE_START_IDX = ROOT_ROT_END_IDX
-    JOINT_POSE_END_IDX = JOINT_POSE_START_IDX + JOINT_POS_SIZE
+    JOINT_POSE_START_IDX = ROOT_ROT_END_IDX # 7
+    JOINT_POSE_END_IDX = JOINT_POSE_START_IDX + JOINT_POS_SIZE # 19
 
-    TAR_TOE_POS_LOCAL_START_IDX = JOINT_POSE_END_IDX
-    TAR_TOE_POS_LOCAL_END_IDX = TAR_TOE_POS_LOCAL_START_IDX + TAR_TOE_POS_LOCAL_SIZE
+    TAR_TOE_POS_LOCAL_START_IDX = JOINT_POSE_END_IDX # 19
+    TAR_TOE_POS_LOCAL_END_IDX = TAR_TOE_POS_LOCAL_START_IDX + TAR_TOE_POS_LOCAL_SIZE # 31
 
-    LINEAR_VEL_START_IDX = TAR_TOE_POS_LOCAL_END_IDX
-    LINEAR_VEL_END_IDX = LINEAR_VEL_START_IDX + LINEAR_VEL_SIZE
+    LINEAR_VEL_START_IDX = TAR_TOE_POS_LOCAL_END_IDX # 31
+    LINEAR_VEL_END_IDX = LINEAR_VEL_START_IDX + LINEAR_VEL_SIZE # 34
 
-    ANGULAR_VEL_START_IDX = LINEAR_VEL_END_IDX
-    ANGULAR_VEL_END_IDX = ANGULAR_VEL_START_IDX + ANGULAR_VEL_SIZE
+    ANGULAR_VEL_START_IDX = LINEAR_VEL_END_IDX  # 34
+    ANGULAR_VEL_END_IDX = ANGULAR_VEL_START_IDX + ANGULAR_VEL_SIZE # 37
 
-    JOINT_VEL_START_IDX = ANGULAR_VEL_END_IDX
-    JOINT_VEL_END_IDX = JOINT_VEL_START_IDX + JOINT_VEL_SIZE
+    JOINT_VEL_START_IDX = ANGULAR_VEL_END_IDX # 37
+    JOINT_VEL_END_IDX = JOINT_VEL_START_IDX + JOINT_VEL_SIZE # 49
 
-    TAR_TOE_VEL_LOCAL_START_IDX = JOINT_VEL_END_IDX
-    TAR_TOE_VEL_LOCAL_END_IDX = TAR_TOE_VEL_LOCAL_START_IDX + TAR_TOE_VEL_LOCAL_SIZE
+    TAR_TOE_VEL_LOCAL_START_IDX = JOINT_VEL_END_IDX # 49
+    TAR_TOE_VEL_LOCAL_END_IDX = TAR_TOE_VEL_LOCAL_START_IDX + TAR_TOE_VEL_LOCAL_SIZE # 61
 
     def __init__(
             self,
@@ -182,7 +182,10 @@ class AMPLoader:
     def traj_time_sample_batch(self, traj_idxs):
         """Sample random time for multiple trajectories."""
         subst = self.time_between_frames + self.trajectory_frame_durations[traj_idxs]
+        # print(f"subst: {subst}")
+        # print(f"trajectory_lens: {self.trajectory_lens[traj_idxs] * np.random.uniform(size=len(traj_idxs))}")
         time_samples = self.trajectory_lens[traj_idxs] * np.random.uniform(size=len(traj_idxs)) - subst
+        # print(f"time_samples: {time_samples}")
         return np.maximum(np.zeros_like(time_samples), time_samples)
 
     def slerp(self, val0, val1, blend):

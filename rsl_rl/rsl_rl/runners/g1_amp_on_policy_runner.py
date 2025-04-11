@@ -75,7 +75,7 @@ class G1AMPOnPolicyRunner:
             device, time_between_frames=self.env.dt, preload_transitions=True,
             num_preload_transitions=train_cfg['runner']['amp_num_preload_transitions'],
             motion_files=self.cfg["amp_motion_files"])
-        amp_normalizer = Normalizer(amp_data.observation_dim)
+        amp_normalizer = Normalizer(amp_data.observation_dim) # 71
         discriminator = AMPDiscriminator(
             amp_data.observation_dim * 2,
             train_cfg['runner']['amp_reward_coef'],
@@ -110,8 +110,11 @@ class G1AMPOnPolicyRunner:
         if init_at_random_ep_len:
             self.env.episode_length_buf = torch.randint_like(self.env.episode_length_buf, high=int(self.env.max_episode_length))
         obs = self.env.get_observations()
+        # print('obs', obs.shape)
         privileged_obs = self.env.get_privileged_observations()
+        # print('privileged_obs', privileged_obs.shape)
         amp_obs = self.env.get_amp_observations()
+        # print('amp_obs', amp_obs.shape)
         critic_obs = privileged_obs if privileged_obs is not None else obs
         obs, critic_obs, amp_obs = obs.to(self.device), critic_obs.to(self.device), amp_obs.to(self.device)
         self.alg.actor_critic.train() # switch to train mode (for dropout for example)
@@ -129,6 +132,7 @@ class G1AMPOnPolicyRunner:
             # Rollout
             with torch.inference_mode():
                 for i in range(self.num_steps_per_env):
+                    # self.alg -> AMPPPO
                     actions = self.alg.act(obs, critic_obs, amp_obs)
                     obs, privileged_obs, rewards, dones, infos, reset_env_ids, terminal_amp_states = self.env.step(actions)
                     next_amp_obs = self.env.get_amp_observations()

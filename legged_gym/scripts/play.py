@@ -52,7 +52,7 @@ def play(args):
     env_cfg.domain_rand.randomize_gains = False
     env_cfg.domain_rand.randomize_base_mass = False
 
-    train_cfg.runner.amp_num_preload_transitions = 1
+    train_cfg.runner.amp_num_preload_transitions = 10
 
     # prepare environment
     env, _ = task_registry.make_env(name=args.task, args=args, env_cfg=env_cfg)

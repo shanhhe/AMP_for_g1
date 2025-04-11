@@ -83,6 +83,7 @@ class TaskRegistry():
         # check if there is a registered env with that name
         if name in self.task_classes:
             task_class = self.get_task_class(name)
+            print(f"Creating environment: {name}")
         else:
             raise ValueError(f"Task with name: {name} was not registered")
         if env_cfg is None:
@@ -144,6 +145,7 @@ class TaskRegistry():
             log_dir = os.path.join(log_root, datetime.now().strftime('%b%d_%H-%M-%S') + '_' + train_cfg.runner.run_name)
         
         # print(train_cfg.runner_class_name)
+        # G1AMPOnPolicyRunner
         runner_class = eval(train_cfg.runner_class_name)
         train_cfg_dict = class_to_dict(train_cfg)
         runner = runner_class(env, train_cfg_dict, log_dir, device=args.rl_device)

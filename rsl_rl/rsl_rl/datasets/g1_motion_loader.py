@@ -14,15 +14,7 @@ from rsl_rl.datasets import motion_util
 
 class AMPLoader:
     # Constants for indexing into the motion data - specific to 36-value format
-    ROOT_POS_START_IDX = 0
-    ROOT_POS_END_IDX = 3
-    
-    ROOT_ROT_START_IDX = 3
-    ROOT_ROT_END_IDX = 7
-    
-    # Joint positions start right after root rotation
-    JOINT_POS_START_IDX = 7
-    JOINT_POS_END_IDX = 36  # End at the last joint
+    # 3 + 4 + 29 + 3 + 3 + 29 = 71
     
     # Sizes of each component
     POS_SIZE = 3
@@ -34,14 +26,23 @@ class AMPLoader:
     ANGULAR_VEL_SIZE = 3
     JOINT_VEL_SIZE = 29
 
+    ROOT_POS_START_IDX = 0
+    ROOT_POS_END_IDX = ROOT_POS_START_IDX + POS_SIZE # 3
+
+    ROOT_ROT_START_IDX = ROOT_POS_END_IDX
+    ROOT_ROT_END_IDX = ROOT_ROT_START_IDX + ROT_SIZE # 7
+
+    JOINT_POS_START_IDX = ROOT_ROT_END_IDX
+    JOINT_POS_END_IDX = JOINT_POS_START_IDX + JOINT_POS_SIZE # 36
+
     LINEAR_VEL_START_IDX = JOINT_POS_END_IDX
-    LINEAR_VEL_END_IDX = LINEAR_VEL_START_IDX + LINEAR_VEL_SIZE
+    LINEAR_VEL_END_IDX = LINEAR_VEL_START_IDX + LINEAR_VEL_SIZE # 39
 
     ANGULAR_VEL_START_IDX = LINEAR_VEL_END_IDX
-    ANGULAR_VEL_END_IDX = ANGULAR_VEL_START_IDX + ANGULAR_VEL_SIZE
+    ANGULAR_VEL_END_IDX = ANGULAR_VEL_START_IDX + ANGULAR_VEL_SIZE # 42
 
     JOINT_VEL_START_IDX = ANGULAR_VEL_END_IDX
-    JOINT_VEL_END_IDX = JOINT_VEL_START_IDX + JOINT_VEL_SIZE
+    JOINT_VEL_END_IDX = JOINT_VEL_START_IDX + JOINT_VEL_SIZE # 71
 
     
     
@@ -63,6 +64,7 @@ class AMPLoader:
         
         # Values to store for each trajectory
         self.trajectories = []
+        self.extended_traj = []
         self.trajectories_full = []
         self.trajectory_names = []
         self.trajectory_idxs = []
@@ -182,11 +184,14 @@ class AMPLoader:
                 extended_motion_data[:, :motion_data.shape[1]] = motion_data  # Original data
                 
                 # Add velocities
-                vel_offset = motion_data.shape[1]
-                extended_motion_data[:, vel_offset:vel_offset+self.LINEAR_VEL_SIZE] = lin_vel
-                extended_motion_data[:, vel_offset+self.LINEAR_VEL_SIZE:vel_offset+self.LINEAR_VEL_SIZE+self.ANGULAR_VEL_SIZE] = ang_vel
-                extended_motion_data[:, vel_offset+self.LINEAR_VEL_SIZE+self.ANGULAR_VEL_SIZE:] = joint_vel
+                extended_motion_data[:, self.LINEAR_VEL_START_IDX:self.LINEAR_VEL_END_IDX] = lin_vel
+                extended_motion_data[:, self.ANGULAR_VEL_START_IDX:self.ANGULAR_VEL_END_IDX] = ang_vel
+                extended_motion_data[:, self.JOINT_VEL_START_IDX:] = joint_vel
                 
+                self.extended_traj.append(torch.tensor(
+                    extended_motion_data[:, self.JOINT_POS_START_IDX:],
+                    dtype=torch.float32, device=device))
+
                 # Store extended data as tensor
                 self.trajectories_full.append(torch.tensor(
                     extended_motion_data,
@@ -216,7 +221,7 @@ class AMPLoader:
         self.trajectory_num_frames = np.array(self.trajectory_num_frames)
 
         # Preload transitions
-        self.preload_transitions = preload_transitions
+        self.preload_transitions = preload_transitions # True
         if self.preload_transitions:
             print(f'Preloading {num_preload_transitions} transitions')
             traj_idxs = self.weighted_traj_idx_sample_batch(num_preload_transitions)
@@ -226,6 +231,9 @@ class AMPLoader:
             print(f'Finished preloading')
 
         self.all_trajectories_full = torch.vstack(self.trajectories_full) if self.trajectories_full else torch.tensor([])
+        print(f'trajectories shape: {self.trajectories[0].shape}')
+        print(f'trajectories_full shape: {self.trajectories_full[0].shape}')
+        print(f'all_trajectories_full shape: {self.all_trajectories_full.shape}')
         
     @staticmethod
     def get_root_pos(pose):
@@ -358,6 +366,7 @@ class AMPLoader:
 
     def get_full_frame_at_time_batch(self, traj_idxs, times):
         """Returns full frames for the given trajectories at the specified times."""
+        """找到时间点对应的各项观测量，并在低位高位之间进行插值，返回插值后观测量"""
         p = times / np.maximum(self.trajectory_lens[traj_idxs], 1e-10)  # Avoid division by zero
         n = self.trajectory_num_frames[traj_idxs]
         idx_low, idx_high = np.floor(p * n).astype(np.int), np.ceil(p * n).astype(np.int)
@@ -383,8 +392,6 @@ class AMPLoader:
         all_frame_joint_vel_starts = torch.zeros(len(traj_idxs), self.JOINT_VEL_SIZE, device=self.device)
         all_frame_joint_vel_ends = torch.zeros(len(traj_idxs), self.JOINT_VEL_SIZE, device=self.device)
         
-        # Offset for velocity data in full trajectory
-        vel_offset = self.ROOT_POS_END_IDX + self.ROT_SIZE + self.JOINT_POS_SIZE
         
         for traj_idx in set(traj_idxs):
             trajectory = self.trajectories_full[traj_idx]
@@ -401,16 +408,14 @@ class AMPLoader:
             all_frame_joint_ends[traj_mask] = self.get_joint_pose_batch(trajectory[idx_high[traj_mask]])
             
             # Extract velocity components
-            all_frame_lin_vel_starts[traj_mask] = trajectory[idx_low[traj_mask], vel_offset:vel_offset+self.LINEAR_VEL_SIZE]
-            all_frame_lin_vel_ends[traj_mask] = trajectory[idx_high[traj_mask], vel_offset:vel_offset+self.LINEAR_VEL_SIZE]
+            all_frame_lin_vel_starts[traj_mask] = self.get_linear_vel_batch(trajectory[idx_low[traj_mask]])
+            all_frame_lin_vel_ends[traj_mask] = self.get_linear_vel_batch(trajectory[idx_high[traj_mask]])
             
-            offset = vel_offset + self.LINEAR_VEL_SIZE
-            all_frame_ang_vel_starts[traj_mask] = trajectory[idx_low[traj_mask], offset:offset+self.ANGULAR_VEL_SIZE]
-            all_frame_ang_vel_ends[traj_mask] = trajectory[idx_high[traj_mask], offset:offset+self.ANGULAR_VEL_SIZE]
+            all_frame_ang_vel_starts[traj_mask] = self.get_angular_vel_batch(trajectory[idx_low[traj_mask]])
+            all_frame_ang_vel_ends[traj_mask] = self.get_angular_vel_batch(trajectory[idx_high[traj_mask]])
             
-            offset = offset + self.ANGULAR_VEL_SIZE
-            all_frame_joint_vel_starts[traj_mask] = trajectory[idx_low[traj_mask], offset:offset+self.JOINT_VEL_SIZE]
-            all_frame_joint_vel_ends[traj_mask] = trajectory[idx_high[traj_mask], offset:offset+self.JOINT_VEL_SIZE]
+            all_frame_joint_vel_starts[traj_mask] = self.get_joint_vel_batch(trajectory[idx_low[traj_mask]])
+            all_frame_joint_vel_ends[traj_mask] = self.get_joint_vel_batch(trajectory[idx_high[traj_mask]])
         
         blend = torch.tensor(p * n - idx_low, device=self.device, dtype=torch.float32).unsqueeze(-1)
 
@@ -524,7 +529,7 @@ class AMPLoader:
                     self.preloaded_s.shape[0], size=mini_batch_size)
                 
                 # Get only the joint positions for the state
-                s = self.preloaded_s[idxs, self.JOINT_POS_START_IDX:self.JOINT_POS_END_IDX]
+                s = self.preloaded_s[idxs, self.JOINT_POS_START_IDX:self.JOINT_VEL_END_IDX]
                 
                 # Add root height (Z coordinate)
                 s = torch.cat([
@@ -532,7 +537,7 @@ class AMPLoader:
                     self.preloaded_s[idxs, self.ROOT_POS_START_IDX + 2:self.ROOT_POS_START_IDX + 3]], dim=-1)
                 
                 # Same for next state
-                s_next = self.preloaded_s_next[idxs, self.JOINT_POS_START_IDX:self.JOINT_POS_END_IDX]
+                s_next = self.preloaded_s_next[idxs, self.JOINT_POS_START_IDX:self.JOINT_VEL_END_IDX]
                 s_next = torch.cat([
                     s_next,
                     self.preloaded_s_next[idxs, self.ROOT_POS_START_IDX + 2:self.ROOT_POS_START_IDX + 3]], dim=-1)
@@ -561,4 +566,4 @@ class AMPLoader:
     @property
     def observation_dim(self):
         """Size of AMP observations."""
-        return self.JOINT_POS_SIZE + 1  # Joint positions + root height
+        return self.extended_traj[0].shape[1] + 1 # Joint positions + root height
