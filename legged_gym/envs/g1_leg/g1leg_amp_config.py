@@ -31,19 +31,19 @@ import glob
 
 from legged_gym.envs.base.g1_legged_robot_config import G1LeggedRobotCfg, G1LeggedRobotCfgPPO
 
-MOTION_FILES = glob.glob('datasets/g1/walk1_subject2.csv')
+MOTION_FILES = glob.glob('datasets/g1/walk.csv')
 
 
-class G1AMPCfg( G1LeggedRobotCfg ):
+class G1LEGAMPCfg( G1LeggedRobotCfg ):
 
     class env( G1LeggedRobotCfg.env ):
-        num_actions = 29
-        num_envs = 5480
+        num_actions = 12
+        num_envs = 64
         include_history_steps = None  # Number of steps of history to include.
-        # 3 + 3 + 3 + 3 + 29 + 29 + 29 + 2 = 101
-        num_observations = 98
-        num_privileged_obs = 101
-        reference_state_initialization = True
+        # 3 + 3 + 3 + 3 + 12 + 12 + 12 + 2 = 50
+        num_observations = 47
+        num_privileged_obs = 50
+        reference_state_initialization = False
         reference_state_initialization_prob = 0.85
         amp_motion_files = MOTION_FILES
 
@@ -62,25 +62,6 @@ class G1AMPCfg( G1LeggedRobotCfg ):
             'right_knee_joint': 0.3,   # [rad]
             'right_ankle_pitch_joint': -0.15,   # [rad]
             'right_ankle_roll_joint': 0.0,   # [rad]
-
-            'waist_yaw_joint': 0.0,   # [rad]
-            'waist_roll_joint': 0.0,   # [rad]
-            'waist_pitch_joint': 0.0 ,  # [rad]
-
-            'left_shoulder_pitch_joint': 0.0,     # [rad]
-            'left_shoulder_roll_joint': 0.5,   # [rad]
-            'left_shoulder_yaw_joint': 0.0,     # [rad]
-            'left_elbow_joint': 1.57,   # [rad]
-            'left_wrist_roll_joint': 0.0,     # [rad]
-            'left_wrist_pitch_joint': 0.0,   # [rad]
-            'left_wrist_yaw_joint': 0.0,     # [rad]
-            'right_shoulder_pitch_joint': 0.0,     # [rad]
-            'right_shoulder_roll_joint': 0.5,   # [rad]
-            'right_shoulder_yaw_joint': 0.0,     # [rad]
-            'right_elbow_joint': 1.57,   # [rad]
-            'right_wrist_roll_joint': 0.0,     # [rad]
-            'right_wrist_pitch_joint': 0.0,   # [rad]
-            'right_wrist_yaw_joint': 0.0,     # [rad]
         }
 
     class control( G1LeggedRobotCfg.control ):
@@ -91,64 +72,24 @@ class G1AMPCfg( G1LeggedRobotCfg ):
                         'hip_pitch': 100,
                         'knee': 150,
                         'ankle': 40,
-                        'waist_yaw': 100,
-                        'waist_roll': 100,
-                        'waist_pitch': 100,
-                        'shoulder_pitch': 100,
-                        'shoulder_roll': 100,
-                        'shoulder_yaw': 100,
-                        'elbow': 100,
-                        'wrist_roll': 40,
-                        'wrist_pitch': 40,
-                        'wrist_yaw': 40,
                      }  # [N*m/rad]
         damping = {     'hip_yaw': 2,
                         'hip_roll': 2,
                         'hip_pitch': 2,
                         'knee': 4,
                         'ankle': 2,
-                        'waist_yaw': 2,
-                        'waist_roll': 2,
-                        'waist_pitch': 2,
-                        'shoulder_pitch': 2,
-                        'shoulder_roll': 2,
-                        'shoulder_yaw': 2,
-                        'elbow': 2,
-                        'wrist_roll': 2,
-                        'wrist_pitch': 2,
-                        'wrist_yaw': 2,
                      }     # [N*m*s/rad]
         # stiffness = {   'hip_yaw': 0,
         #                 'hip_roll': 0,
         #                 'hip_pitch': 0,
         #                 'knee': 0,
         #                 'ankle': 0,
-        #                 'waist_yaw': 0,
-        #                 'waist_roll': 0,
-        #                 'waist_pitch': 0,
-        #                 'shoulder_pitch': 0,
-        #                 'shoulder_roll': 0,
-        #                 'shoulder_yaw': 0,
-        #                 'elbow': 0,
-        #                 'wrist_roll': 0,
-        #                 'wrist_pitch': 0,
-        #                 'wrist_yaw': 0,
         #              }  # [N*m/rad]
         # damping = {     'hip_yaw': 0,
         #                 'hip_roll': 0,
         #                 'hip_pitch': 0,
         #                 'knee': 0,
         #                 'ankle': 0,
-        #                 'waist_yaw': 0,
-        #                 'waist_roll': 0,
-        #                 'waist_pitch': 0,
-        #                 'shoulder_pitch': 0,
-        #                 'shoulder_roll': 0,
-        #                 'shoulder_yaw': 0,
-        #                 'elbow': 0,
-        #                 'wrist_roll': 0,
-        #                 'wrist_pitch': 0,
-        #                 'wrist_yaw': 0,
         #              }     # [N*m*s/rad]
         # action scale: target angle = actionScale * action + defaultAngle
         action_scale = 0.25
@@ -160,13 +101,14 @@ class G1AMPCfg( G1LeggedRobotCfg ):
         measure_heights = False
 
     class asset( G1LeggedRobotCfg.asset ):
-        file = '{LEGGED_GYM_ROOT_DIR}/resources/robots/g1_description/g1_29dof_rev_1_0.urdf'
+        file = '{LEGGED_GYM_ROOT_DIR}/resources/robots/g1_description/g1_12dof.urdf'
         name = 'g1_amp'
-        foot_name = "ankle_pitch"
+        foot_name = "ankle_roll"
         penalize_contacts_on = ["hip", "knee"]
         knee_name = "knee"
+        # terminate_after_contacts_on = ["pelvis", "head", "hip", "wrist", "torso", "shoulder", "elbow", "knee"]
         terminate_after_contacts_on = ["pelvis", "head", "hip", "wrist", "torso", "shoulder", "elbow", "knee"]
-        self_collisions = 1 # 1 to disable, 0 to enable...bitwise filter
+        self_collisions = 0 # 1 to disable, 0 to enable...bitwise filter
         flip_visual_attachments = False
   
     class domain_rand:
@@ -196,44 +138,44 @@ class G1AMPCfg( G1LeggedRobotCfg ):
         soft_dof_pos_limit = 0.9
         base_height_target = 0.78
         class scales( G1LeggedRobotCfg.rewards.scales ):
-            # termination = 0.0
+            termination = 0.0
+            tracking_lin_vel = 1.5 * 1. / (.005 * 6)
+            tracking_ang_vel = 0.5 * 1. / (.005 * 6)
+            lin_vel_z = 0.0
+            ang_vel_xy = 0.0
+            orientation = 0.0
+            torques = 0.0
+            dof_vel = 0.0
+            dof_acc = 0.0
+            base_height = 0.0 
+            feet_air_time =  0.0
+            collision = 0.0
+            feet_stumble = 0.0
+            action_rate = 0.0
+            stand_still = 0.0
+            dof_pos_limits = 0.0
+
             # tracking_lin_vel = 1.5 * 1. / (.005 * 6)
             # tracking_ang_vel = 0.5 * 1. / (.005 * 6)
-            # lin_vel_z = 0.0
-            # ang_vel_xy = 0.0
-            # orientation = 0.0
-            # torques = 0.0
-            # dof_vel = 0.0
-            # dof_acc = 0.0
-            # base_height = 0.0 
-            # feet_air_time =  0.0
-            # collision = 0.0
-            # feet_stumble = 0.0
-            # action_rate = 0.0
-            # stand_still = 0.0
-            # dof_pos_limits = 0.0
-
-            tracking_lin_vel = 15 * 1. / (.005 * 6)
-            tracking_ang_vel = 5 * 1. / (.005 * 6)
-            lin_vel_z = -2.0
-            ang_vel_xy = -0.05
-            orientation = -1.0
-            base_height = -10.0
-            dof_acc = -2.5e-7
-            dof_vel = -1e-3
-            feet_air_time = 0.0
-            collision = -0.1
-            action_rate = -0.01
-            dof_pos_limits = -5.0
-            alive = 0.15
-            hip_pos = -1.0
-            contact_no_vel = -0.2
-            feet_swing_height = -20.0
-            contact = 0.18
-            straight_stance_phase = 2.0
-            penalty_knee_hyperextension = 1.0
-            stance_swing_coordination = 2.0
-            swing_height = 0.5
+            # lin_vel_z = -2.0
+            # ang_vel_xy = -0.05
+            # orientation = -1.0
+            # base_height = -10.0
+            # dof_acc = -2.5e-7
+            # dof_vel = -1e-3
+            # feet_air_time = 0.0
+            # collision = -0.1
+            # action_rate = -0.01
+            # dof_pos_limits = -5.0
+            # alive = 0.15
+            # hip_pos = -1.0
+            # contact_no_vel = -0.2
+            # feet_swing_height = -20.0
+            # contact = 0.18
+            # straight_stance_phase = 2.0
+            # penalty_knee_hyperextension = 1.0
+            # stance_swing_coordination = 2.0
+            # swing_height = 0.5
 
     class commands:
         curriculum = False
@@ -250,11 +192,8 @@ class G1AMPCfg( G1LeggedRobotCfg ):
     # class sim( G1LeggedRobotCfg.sim ):
     #     dt = 0.005
 
-    # class asset( LeggedRobotCfg.asset ):
-    #     collapse_fixed_joints = True
-
 class G1AMPCfgPPO( G1LeggedRobotCfgPPO ):
-    runner_class_name = 'G1AMPOnPolicyRunner'
+    runner_class_name = 'G1LEGAMPOnPolicyRunner'
     class algorithm( G1LeggedRobotCfgPPO.algorithm ):
         entropy_coef = 0.01
         amp_replay_buffer_size = 1000000
@@ -262,7 +201,7 @@ class G1AMPCfgPPO( G1LeggedRobotCfgPPO ):
         num_mini_batches = 4
 
     class runner( G1LeggedRobotCfgPPO.runner ):
-        run_name = ''
+        run_name = 'test'
         experiment_name = 'g1_amp_example'
         algorithm_class_name = 'AMPPPO'
         policy_class_name = 'ActorCritic'
@@ -274,7 +213,6 @@ class G1AMPCfgPPO( G1LeggedRobotCfgPPO ):
         amp_task_reward_lerp = 0.3
         amp_discr_hidden_dims = [1024, 512]
 
-        # min_normalized_std = [0.05, 0.02, 0.05] * 4
-        min_normalized_std = [0.05] * 29
+        min_normalized_std = [0.05, 0.02, 0.05] * 4
 
   
