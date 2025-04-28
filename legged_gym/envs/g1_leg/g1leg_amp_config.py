@@ -31,7 +31,7 @@ import glob
 
 from legged_gym.envs.base.g1_legged_robot_config import G1LeggedRobotCfg, G1LeggedRobotCfgPPO
 
-MOTION_FILES = glob.glob('datasets/g1/walk.csv')
+MOTION_FILES = glob.glob('datasets/g1/run1_subject2.csv')
 
 
 class G1LEGAMPCfg( G1LeggedRobotCfg ):
@@ -43,7 +43,7 @@ class G1LEGAMPCfg( G1LeggedRobotCfg ):
         # 3 + 3 + 3 + 3 + 12 + 12 + 12 + 2 = 50
         num_observations = 47
         num_privileged_obs = 50
-        reference_state_initialization = False
+        reference_state_initialization = True
         reference_state_initialization_prob = 0.85
         amp_motion_files = MOTION_FILES
 
@@ -113,12 +113,12 @@ class G1LEGAMPCfg( G1LeggedRobotCfg ):
   
     class domain_rand:
         randomize_friction = False
-        friction_range = [0.25, 1.75]
+        friction_range = [0.1, 1.25]
         randomize_base_mass = False
-        added_mass_range = [-1., 1.]
+        added_mass_range = [-1., 3.]
         push_robots = False
-        push_interval_s = 15
-        max_push_vel_xy = 1.0
+        push_interval_s = 5
+        max_push_vel_xy = 1.5
         randomize_gains = False
         stiffness_multiplier_range = [0.9, 1.1]
         damping_multiplier_range = [0.9, 1.1]
@@ -138,22 +138,22 @@ class G1LEGAMPCfg( G1LeggedRobotCfg ):
         soft_dof_pos_limit = 0.9
         base_height_target = 0.78
         class scales( G1LeggedRobotCfg.rewards.scales ):
-            termination = 0.0
-            tracking_lin_vel = 1.5 * 1. / (.005 * 6)
-            tracking_ang_vel = 0.5 * 1. / (.005 * 6)
-            lin_vel_z = 0.0
-            ang_vel_xy = 0.0
-            orientation = 0.0
-            torques = 0.0
-            dof_vel = 0.0
-            dof_acc = 0.0
-            base_height = 0.0 
-            feet_air_time =  0.0
-            collision = 0.0
-            feet_stumble = 0.0
-            action_rate = 0.0
-            stand_still = 0.0
-            dof_pos_limits = 0.0
+            # termination = 0.0
+            # tracking_lin_vel = 1.5 * 1. / (.005 * 6)
+            # tracking_ang_vel = 0.5 * 1. / (.005 * 6)
+            # lin_vel_z = 0.0
+            # ang_vel_xy = 0.0
+            # orientation = 0.0
+            # torques = 0.0
+            # dof_vel = 0.0
+            # dof_acc = 0.0
+            # base_height = 0.0 
+            # feet_air_time =  0.0
+            # collision = 0.0
+            # feet_stumble = 0.0
+            # action_rate = 0.0
+            # stand_still = 0.0
+            # dof_pos_limits = 0.0
 
             # tracking_lin_vel = 1.5 * 1. / (.005 * 6)
             # tracking_ang_vel = 0.5 * 1. / (.005 * 6)
@@ -177,22 +177,40 @@ class G1LEGAMPCfg( G1LeggedRobotCfg ):
             # stance_swing_coordination = 2.0
             # swing_height = 0.5
 
+            tracking_lin_vel = 2.0
+            tracking_ang_vel = 1.0
+            lin_vel_z = -2.0
+            ang_vel_xy = -0.05
+            orientation = -1.0
+            base_height = -10.0
+            dof_acc = -2.5e-7
+            dof_vel = -1e-3
+            feet_air_time = 0.0
+            collision = 0.0
+            action_rate = -0.01
+            dof_pos_limits = -5.0
+            alive = 0.15
+            hip_pos = -1.0
+            contact_no_vel = -0.2
+            feet_swing_height = -20.0
+            contact = 0.18
+
     class commands:
         curriculum = False
         max_curriculum = 1.
         num_commands = 4 # default: lin_vel_x, lin_vel_y, ang_vel_yaw, heading (in heading mode ang_vel_yaw is recomputed from heading error)
-        resampling_time = 10. # time before command are changed[s]
+        resampling_time = 5. # time before command are changed[s]
         heading_command = False # if true: compute ang vel command from heading error
         class ranges:
-            lin_vel_x = [-1.0, 2.0] # min max [m/s]
-            lin_vel_y = [-0.3, 0.3]   # min max [m/s]
-            ang_vel_yaw = [-1.57, 1.57]    # min max [rad/s]
+            lin_vel_x = [-2.0, 18.0] # min max [m/s]
+            lin_vel_y = [-0.1, 0.1]   # min max [m/s]
+            ang_vel_yaw = [-0.2, 0.2]    # min max [rad/s]
             heading = [-3.14, 3.14]
 
     # class sim( G1LeggedRobotCfg.sim ):
     #     dt = 0.005
 
-class G1AMPCfgPPO( G1LeggedRobotCfgPPO ):
+class G1LEGAMPCfgPPO( G1LeggedRobotCfgPPO ):
     runner_class_name = 'G1LEGAMPOnPolicyRunner'
     class algorithm( G1LeggedRobotCfgPPO.algorithm ):
         entropy_coef = 0.01
@@ -201,16 +219,16 @@ class G1AMPCfgPPO( G1LeggedRobotCfgPPO ):
         num_mini_batches = 4
 
     class runner( G1LeggedRobotCfgPPO.runner ):
-        run_name = 'test'
-        experiment_name = 'g1_amp_example'
+        run_name = 'g1_12_run_new_commandrand=False'
+        experiment_name = 'g1_12_run'
         algorithm_class_name = 'AMPPPO'
         policy_class_name = 'ActorCritic'
         max_iterations = 500000 # number of policy updates
 
-        amp_reward_coef = 2.0
+        amp_reward_coef = 0.01
         amp_motion_files = MOTION_FILES
         amp_num_preload_transitions = 2000000
-        amp_task_reward_lerp = 0.3
+        amp_task_reward_lerp = 0.3 # smaller to rely more on style reward(imitation)
         amp_discr_hidden_dims = [1024, 512]
 
         min_normalized_std = [0.05, 0.02, 0.05] * 4

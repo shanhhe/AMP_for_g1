@@ -36,7 +36,7 @@ from .a1.a1_amp_config import A1AMPCfg, A1AMPCfgPPO
 from .g1.g1_amp_config import G1AMPCfg, G1AMPCfgPPO
 from .base.g1_legged_robot import G1LeggedRobot
 from .g1.g1_amp_env import G1AMPRobot
-from .g1_leg.g1leg_amp_config import G1LEGAMPCfg, G1AMPCfgPPO
+from .g1_leg.g1leg_amp_config import G1LEGAMPCfg, G1LEGAMPCfgPPO
 from .g1_leg.g1leg_amp_env import G1LEGAMPRobot
 
 
@@ -47,5 +47,5 @@ from legged_gym.utils.task_registry import task_registry
 task_registry.register( "a1", LeggedRobot, A1RoughCfg(), A1RoughCfgPPO() )
 task_registry.register( "a1_amp", LeggedRobot, A1AMPCfg(), A1AMPCfgPPO() )
 task_registry.register( "g1_amp", G1AMPRobot, G1AMPCfg(), G1AMPCfgPPO() )
-task_registry.register( "g1_leg", G1LEGAMPRobot, G1LEGAMPCfg(), G1AMPCfgPPO() )
+task_registry.register( "g1_leg", G1LEGAMPRobot, G1LEGAMPCfg(), G1LEGAMPCfgPPO() )
 

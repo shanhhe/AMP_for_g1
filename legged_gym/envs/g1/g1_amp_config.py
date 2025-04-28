@@ -31,7 +31,7 @@ import glob
 
 from legged_gym.envs.base.g1_legged_robot_config import G1LeggedRobotCfg, G1LeggedRobotCfgPPO
 
-MOTION_FILES = glob.glob('datasets/g1/walk1_subject2.csv')
+MOTION_FILES = glob.glob('datasets/g1/walk.csv')
 
 
 class G1AMPCfg( G1LeggedRobotCfg ):
@@ -43,7 +43,7 @@ class G1AMPCfg( G1LeggedRobotCfg ):
         # 3 + 3 + 3 + 3 + 29 + 29 + 29 + 2 = 101
         num_observations = 98
         num_privileged_obs = 101
-        reference_state_initialization = True
+        reference_state_initialization = False
         reference_state_initialization_prob = 0.85
         amp_motion_files = MOTION_FILES
 
@@ -166,7 +166,7 @@ class G1AMPCfg( G1LeggedRobotCfg ):
         penalize_contacts_on = ["hip", "knee"]
         knee_name = "knee"
         terminate_after_contacts_on = ["pelvis", "head", "hip", "wrist", "torso", "shoulder", "elbow", "knee"]
-        self_collisions = 1 # 1 to disable, 0 to enable...bitwise filter
+        self_collisions = 0 # 1 to disable, 0 to enable...bitwise filter
         flip_visual_attachments = False
   
     class domain_rand:
@@ -213,8 +213,30 @@ class G1AMPCfg( G1LeggedRobotCfg ):
             # stand_still = 0.0
             # dof_pos_limits = 0.0
 
-            tracking_lin_vel = 15 * 1. / (.005 * 6)
-            tracking_ang_vel = 5 * 1. / (.005 * 6)
+            # tracking_lin_vel = 15 * 1. / (.005 * 6)
+            # tracking_ang_vel = 5 * 1. / (.005 * 6)
+            # lin_vel_z = -2.0
+            # ang_vel_xy = -0.05
+            # orientation = -1.0
+            # base_height = -10.0
+            # dof_acc = -2.5e-7
+            # dof_vel = -1e-3
+            # feet_air_time = 0.0
+            # collision = -0.1
+            # action_rate = -0.01
+            # dof_pos_limits = -5.0
+            # alive = 0.15
+            # hip_pos = -1.0
+            # contact_no_vel = -0.2
+            # feet_swing_height = -20.0
+            # contact = 0.18
+            # straight_stance_phase = 2.0
+            # penalty_knee_hyperextension = 1.0
+            # stance_swing_coordination = 2.0
+            # swing_height = 0.5
+
+            tracking_lin_vel = 1.0
+            tracking_ang_vel = 0.5
             lin_vel_z = -2.0
             ang_vel_xy = -0.05
             orientation = -1.0
@@ -222,7 +244,7 @@ class G1AMPCfg( G1LeggedRobotCfg ):
             dof_acc = -2.5e-7
             dof_vel = -1e-3
             feet_air_time = 0.0
-            collision = -0.1
+            collision = 0.0
             action_rate = -0.01
             dof_pos_limits = -5.0
             alive = 0.15
@@ -230,10 +252,6 @@ class G1AMPCfg( G1LeggedRobotCfg ):
             contact_no_vel = -0.2
             feet_swing_height = -20.0
             contact = 0.18
-            straight_stance_phase = 2.0
-            penalty_knee_hyperextension = 1.0
-            stance_swing_coordination = 2.0
-            swing_height = 0.5
 
     class commands:
         curriculum = False
@@ -243,9 +261,9 @@ class G1AMPCfg( G1LeggedRobotCfg ):
         heading_command = False # if true: compute ang vel command from heading error
         class ranges:
             lin_vel_x = [-1.0, 2.0] # min max [m/s]
-            lin_vel_y = [-0.3, 0.3]   # min max [m/s]
-            ang_vel_yaw = [-1.57, 1.57]    # min max [rad/s]
-            heading = [-3.14, 3.14]
+            lin_vel_y = [0.0, 0.0]   # min max [m/s]
+            ang_vel_yaw = [0.0, 0.0]    # min max [rad/s]
+            heading = [0.0, 0.0]
 
     # class sim( G1LeggedRobotCfg.sim ):
     #     dt = 0.005
@@ -262,19 +280,19 @@ class G1AMPCfgPPO( G1LeggedRobotCfgPPO ):
         num_mini_batches = 4
 
     class runner( G1LeggedRobotCfgPPO.runner ):
-        run_name = ''
-        experiment_name = 'g1_amp_example'
+        run_name = 'amp_task_reward_lerp=1'
+        experiment_name = 'g1_amp_29'
         algorithm_class_name = 'AMPPPO'
         policy_class_name = 'ActorCritic'
         max_iterations = 500000 # number of policy updates
 
-        amp_reward_coef = 2.0
+        amp_reward_coef = 0.002
         amp_motion_files = MOTION_FILES
         amp_num_preload_transitions = 2000000
-        amp_task_reward_lerp = 0.3
+        amp_task_reward_lerp = 1
         amp_discr_hidden_dims = [1024, 512]
 
         # min_normalized_std = [0.05, 0.02, 0.05] * 4
-        min_normalized_std = [0.05] * 29
+        min_normalized_std = [0.03] * 29
 
   

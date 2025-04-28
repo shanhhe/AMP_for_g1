@@ -173,6 +173,9 @@ class G1LeggedRobot(BaseTask):
         self.base_ang_vel[:] = quat_rotate_inverse(self.base_quat, self.root_states[:, 10:13])
         self.projected_gravity[:] = quat_rotate_inverse(self.base_quat, self.gravity_vec)
 
+        self.lin_vel_error_buf[:] = torch.sum(torch.square(self.commands[:, :2] - self.base_lin_vel[:, :2]), dim=1)
+        self.ang_vel_error_buf[:] = torch.square(self.commands[:, 2] - self.base_ang_vel[:, 2])
+
         self._post_physics_step_callback()
 
         # compute observations, rewards, resets, ...
@@ -253,6 +256,10 @@ class G1LeggedRobot(BaseTask):
         # send timeout info to the algorithm
         if self.cfg.env.send_timeouts:
             self.extras["time_outs"] = self.time_out_buf
+
+        self.extras["episode"]["lin_vel_error"] = torch.mean(self.lin_vel_error_buf[env_ids])
+        self.extras["episode"]["ang_vel_error"] = torch.mean(self.ang_vel_error_buf[env_ids])
+
     
     def compute_reward(self):
         """ Compute rewards
@@ -691,6 +698,11 @@ class G1LeggedRobot(BaseTask):
         self.base_lin_vel = quat_rotate_inverse(self.base_quat, self.root_states[:, 7:10])
         self.base_ang_vel = quat_rotate_inverse(self.base_quat, self.root_states[:, 10:13])
         self.projected_gravity = quat_rotate_inverse(self.base_quat, self.gravity_vec)
+
+    
+        self.lin_vel_error_buf = torch.zeros(self.num_envs, dtype=torch.float, device=self.device, requires_grad=False)
+        self.ang_vel_error_buf = torch.zeros(self.num_envs, dtype=torch.float, device=self.device, requires_grad=False)
+
         if self.cfg.terrain.measure_heights:
             # 初始化用于存储测量高度的张量
             self.height_points = self._init_height_points()
@@ -956,7 +968,6 @@ class G1LeggedRobot(BaseTask):
             env_handle = self.gym.create_env(self.sim, env_lower, env_upper, int(np.sqrt(self.num_envs)))
             pos = self.env_origins[i].clone()
             pos[:2] += torch_rand_float(-1., 1., (2,1), device=self.device).squeeze(1)
-            print(f"Creating env {i} at {pos}")
             start_pose.p = gymapi.Vec3(*pos)
                 
             rigid_shape_props = self._process_rigid_shape_props(rigid_shape_props_asset, i)
