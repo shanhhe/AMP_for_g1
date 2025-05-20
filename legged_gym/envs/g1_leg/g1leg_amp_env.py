@@ -1,11 +1,11 @@
 
-from legged_gym.envs.base.g1leg_legged_robot import G1LeggedRobot
+from legged_gym.envs.base.g1leg_legged_robot import G1legLeggedRobot
 
 from isaacgym.torch_utils import *
 from isaacgym import gymtorch, gymapi, gymutil
 import torch
 
-class G1LEGAMPRobot(G1LeggedRobot):
+class G1LEGAMPRobot(G1legLeggedRobot):
     
     def _get_noise_scale_vec(self, cfg):
         """ Sets a vector used to scale the noise added to the observations.

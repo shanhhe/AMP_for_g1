@@ -59,7 +59,7 @@ HIP_OFFSETS = torch.tensor([
 ]) + PELVIS_OFFSET
 
 
-class G1LeggedRobot(BaseTask):
+class G1legLeggedRobot(BaseTask):
     def __init__(self, cfg: G1LeggedRobotCfg, sim_params, physics_engine, sim_device, headless):
         """ Parses the provided config file,
             calls create_sim() (which creates, simulation, terrain and environments),
