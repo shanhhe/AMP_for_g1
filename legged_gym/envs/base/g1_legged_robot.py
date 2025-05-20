@@ -89,7 +89,7 @@ class G1LeggedRobot(BaseTask):
 
         # 这里data仅用来reset
         if self.cfg.env.reference_state_initialization:
-            self.amp_loader = AMPLoader(motion_files=self.cfg.env.amp_motion_files, device=self.device, time_between_frames=self.dt)
+            self.amp_loader = AMPLoader(motion_files=self.cfg.env.amp_motion_files, device=self.device, time_between_frames=self.dt*self.cfg.control.decimation)
 
     def reset(self):
         """ Reset all robots"""
@@ -199,8 +199,14 @@ class G1LeggedRobot(BaseTask):
         """ Check if environments need to be reset
         """
         self.reset_buf = torch.any(torch.norm(self.contact_forces[:, self.termination_contact_indices, :], dim=-1) > 1., dim=1)
+
+        # Reset if base z position is below threshold
+        base_z = self.root_states[:, 2]
+        z_reset_buf = base_z < self.cfg.asset.terminate_after_base_z
+        
         self.time_out_buf = self.episode_length_buf > self.max_episode_length # no terminal reward for time-outs
         self.reset_buf |= self.time_out_buf
+        self.reset_buf |= z_reset_buf
 
     def reset_idx(self, env_ids):
         """ Reset some environments.
@@ -349,7 +355,7 @@ class G1LeggedRobot(BaseTask):
         joint_vel = self.dof_vel # 29
         z_pos = self.root_states[:, 2:3] # 1
         # return torch.cat((joint_pos, foot_pos, base_lin_vel, base_ang_vel, joint_vel, z_pos), dim=-1)
-        return torch.cat((joint_pos, base_lin_vel, base_ang_vel, joint_vel, z_pos), dim=-1)
+        return torch.cat((joint_pos, base_lin_vel, base_ang_vel, joint_vel, z_pos), dim=-1)       
 
     def create_sim(self):
         """ Creates simulation, terrain and evironments
@@ -954,7 +960,7 @@ class G1LeggedRobot(BaseTask):
         self.base_init_state = to_torch(base_init_state_list, device=self.device, requires_grad=False)
         start_pose = gymapi.Transform()
         start_pose.p = gymapi.Vec3(*self.base_init_state[:3])
-        print(f"Base init state: {self.base_init_state[:3]}")
+        # print(f"Base init state: {self.base_init_state[:3]}")
 
         self._get_env_origins()
         env_lower = gymapi.Vec3(0., 0., 0.)

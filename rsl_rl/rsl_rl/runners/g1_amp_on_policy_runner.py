@@ -72,7 +72,7 @@ class G1AMPOnPolicyRunner:
                                                         **self.policy_cfg).to(self.device)
 
         amp_data = AMPLoader(
-            device, time_between_frames=self.env.dt, preload_transitions=True,
+            device, time_between_frames=self.env.dt*6, preload_transitions=True, # time_between_frames=self.env.dt*cfg.control.decimation
             num_preload_transitions=train_cfg['runner']['amp_num_preload_transitions'],
             motion_files=self.cfg["amp_motion_files"])
         amp_normalizer = Normalizer(amp_data.observation_dim) # 71
@@ -163,7 +163,7 @@ class G1AMPOnPolicyRunner:
                         lenbuffer.extend(cur_episode_length[new_ids][:, 0].cpu().numpy().tolist())
                         amprewardbuffer.extend(cur_amp_reward_sum[new_ids][:, 0].cpu().numpy().tolist())
                         cur_reward_sum[new_ids] = 0
-                        cur_reward_sum[new_ids] = 0
+                        cur_amp_reward_sum[new_ids] = 0
                         cur_episode_length[new_ids] = 0
 
                 stop = time.time()

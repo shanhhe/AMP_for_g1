@@ -6,7 +6,7 @@ from legged_gym import LEGGED_GYM_ROOT_DIR
 
 import isaacgym
 from legged_gym.envs import *
-from legged_gym.utils import  get_args, export_policy_as_jit, task_registry, Logger
+from legged_gym.utils import  get_args, export_policy_as_jit, task_registry, LoggerPD
 from isaacgym import gymtorch, gymapi, gymutil
 import matplotlib.pyplot as plt
 
@@ -132,21 +132,21 @@ def play(args):
     env_cfg.asset.fix_base_link = True
     env_cfg.control.control_type = 'T'
     env_cfg.control.action_scale = 1.0
+    env_cfg.env.reference_state_initialization=False
+    env_cfg.env.include_history_steps=None
     # env_cfg.asset.disable_gravity = True
 
     env_cfg.env.test = True
     robot_index = 0  # Index of the robot to track
-    stop_state_log = 100  # Number of steps for logging states
+    stop_state_log = 200  # Number of steps for logging states
 
     camera_offset = np.array([2.0, 0.0, 1.0])  # Adjust this offset as needed
 
     # Prepare environment
     env, env_cfg = task_registry.make_env(name=args.task, args=args, env_cfg=env_cfg)
-    print("env_cfg:",env_cfg)
-    print("env:",env)
     # obs = env.get_observations()
 
-    logger = Logger(env.dt)
+    logger = LoggerPD(env.dt)
     logger.log_dir = args.log_dir
     stop_rew_log = env.max_episode_length + 1  # Steps for average reward calculation
 
@@ -168,12 +168,13 @@ def play(args):
     time_step = env.dt  # Time step of the simulation
     time = 0  # Initialize time
 
-    # joint_name = args.joint_name  # Index for waist_roll_joint
-    # joint_index = env.dof_dict[joint_name]
-    joint_index = 0
-    joint_name = env.dof_names[joint_index]
+    joint_name = args.joint_name  # Index for waist_roll_joint
+    joint_index = env.dof_dict[joint_name]
+    # joint_index = 0
+    # joint_name = env.dof_names[joint_index]
 
-    for i in range(10 * int(env.max_episode_length)):
+
+    for i in range(4 * int(env.max_episode_length)):
         # Check and update command ranges
         # command_interface = _check_command_interface()
         # _update_command_ranges(env, command_interface)
@@ -199,7 +200,7 @@ def play(args):
         # Increment time
         time += time_step
         # p_gains = torch.tensor([100.0, 50], device=env.device)  # PD position gains for roll and pitch
-        # d_gains = torch.tensor([6.0, 4.0], device=env.device)    # PD velocity gains for rol·l and pitch
+        # d_gains = torch.tensor([6.0, 4.0], device=env.device)    # PD velocity gains for roll and pitch
         p_gains = torch.tensor([args.p_gain], device=env.device)  # PD position gains for roll and pitch
         d_gains = torch.tensor([args.d_gain], device=env.device)    # PD velocity gains for roll and pitch
 
@@ -217,8 +218,7 @@ def play(args):
                 - d_gains * joint_velocities
         # print('torques:',torques)
         # Apply calculated torques
-        # custom_actions[:, [waist_roll_index, waist_pitch_index]] = torques
-        custom_actions[:, joint_index] = 0
+        custom_actions[:, joint_index] = torques
 
         # Step the environment with custom actions
         obs, _, rews, dones, infos, _, _ = env.step(custom_actions)
@@ -247,43 +247,43 @@ def play(args):
         #     env.gym.write_viewer_image_to_file(env.viewer, filename)
 
         # Logging states
-        # if i < stop_state_log:
-        #     logger.log_states(
-        #     {
-        #         # f'actual_torque_{args.joint_name}': env.torques[:, joint_index].cpu().numpy(),
-        #         # f'torque_{args.joint_name}': torques[:, 0].cpu().numpy(),
-        #         # # 'waist_pitch_torque': torques[:, 1].cpu().numpy(),
-        #         # f'position_{args.joint_name}': joint_positions[:, 0].cpu().numpy(),
-        #         # # 'waist_pitch_position': joint_positions[:, 1].cpu().numpy(),
-        #         # f'velocity_{args.joint_name}': joint_velocities[:, 0].cpu().numpy(),
-        #         # f'desired_position_{args.joint_name}': desired_positions[:, joint_index].cpu().numpy(),
-        #         # f'error_{args.joint_name}': (desired_positions[:, joint_index] - joint_positions[:, 0]).cpu().numpy(),
-        #         # f'p_gain_{args.joint_name}': p_gains.item(),
-        #         # f'd_gain_{args.joint_name}': d_gains.item(),
-        #         # 'waist_pitch_velocity': joint_velocities[:, 1].cpu().numpy(),
+        if i < stop_state_log:
+            logger.log_states(
+            {
+                # f'actual_torque_{args.joint_name}': env.torques[:, joint_index].cpu().numpy(),
+                # f'torque_{args.joint_name}': torques[:, 0].cpu().numpy(),
+                # # 'waist_pitch_torque': torques[:, 1].cpu().numpy(),
+                # f'position_{args.joint_name}': joint_positions[:, 0].cpu().numpy(),
+                # # 'waist_pitch_position': joint_positions[:, 1].cpu().numpy(),
+                # f'velocity_{args.joint_name}': joint_velocities[:, 0].cpu().numpy(),
+                # f'desired_position_{args.joint_name}': desired_positions[:, joint_index].cpu().numpy(),
+                # f'error_{args.joint_name}': (desired_positions[:, joint_index] - joint_positions[:, 0]).cpu().numpy(),
+                # f'p_gain_{args.joint_name}': p_gains.item(),
+                # f'd_gain_{args.joint_name}': d_gains.item(),
+                # 'waist_pitch_velocity': joint_velocities[:, 1].cpu().numpy(),
 
-        #         f'actual_torque_{joint_name}': env.torques[:, joint_index].cpu().numpy(),
-        #         f'torque_{joint_name}': torques[:, 0].cpu().numpy(),
-        #         # 'waist_pitch_torque': torques[:, 1].cpu().numpy(),
-        #         f'position_{joint_name}': joint_positions[:, 0].cpu().numpy(),
-        #         # 'waist_pitch_position': joint_positions[:, 1].cpu().numpy(),
-        #         f'velocity_{joint_name}': joint_velocities[:, 0].cpu().numpy(),
-        #         f'desired_position_{joint_name}': desired_positions[:, joint_index].cpu().numpy(),
-        #         f'error_{joint_name}': (desired_positions[:, joint_index] - joint_positions[:, 0]).cpu().numpy(),
-        #         f'p_gain_{joint_name}': p_gains.item(),
-        #         f'd_gain_{joint_name}': d_gains.item(),
-        #     }
-        # )
-        # elif i == stop_state_log:
-        #     logger.plot_states(p_gains.item(), d_gains.item())
-        #     stop_state_log += 100
-        #     stabilize_robot(env, joint_index)
-        #     # joint_index += 1
-        #     args.torque += 50
-            # joint_name = env.dof_names[joint_index]
+                f'actual_torque_{joint_name}': env.torques[:, joint_index].cpu().numpy(),
+                f'torque_{joint_name}': torques[:, 0].cpu().numpy(),
+                # 'waist_pitch_torque': torques[:, 1].cpu().numpy(),
+                f'position_{joint_name}': joint_positions[:, 0].cpu().numpy(),
+                # 'waist_pitch_position': joint_positions[:, 1].cpu().numpy(),
+                f'velocity_{joint_name}': joint_velocities[:, 0].cpu().numpy(),
+                f'desired_position_{joint_name}': desired_positions[:, joint_index].cpu().numpy(),
+                f'error_{joint_name}': (desired_positions[:, joint_index] - joint_positions[:, 0]).cpu().numpy(),
+                f'p_gain_{joint_name}': p_gains.item(),
+                f'd_gain_{joint_name}': d_gains.item(),
+            }
+        )
+        elif i == stop_state_log:
+            logger.plot_states(p_gains.item(), d_gains.item())
+            stop_state_log += 200
+            stabilize_robot(env, joint_index)
+            # joint_index += 1
+            # args.torque += 50
+            joint_name = env.dof_names[joint_index]
             
-            # args.p_gain += 10
-            # args.d_gain += 0.05
+            # args.p_gain += 2
+            args.d_gain += 0.2
             # env.gym.set_dof_position_target_tensor(env.sim, gymtorch.unwrap_tensor(desired_positions))
         #     # logger.plot_states()
         #     plot_logged_data(logger.state_log)
@@ -303,21 +303,26 @@ def play(args):
 
 
 if __name__ == '__main__':
-    EXPORT_POLICY = True
+    EXPORT_POLICY = False
     RECORD_FRAMES = False
     MOVE_CAMERA = True
 
     args = get_args()
     args.task='g1_amp'
     args.num_envs = 1
-    #{'ankle_pitch_l': 4, 'ankle_pitch_r': 9, 'hip_pitch_l': 1, 'hip_pitch_r': 6, 'hip_roll_l': 2, 'hip_roll_r': 7, 'hip_yaw_l': 0, 'hip_yaw_r': 5, 'knee_pitch_l': 3, 'knee_pitch_r': 8}
-    args.joint_name = 'left_hip_roll_joint'
-    args.torque = -500
-    args.amplitude = 1  # Amplitude of the sine wave
-    args.frequency = 0.5  # Frequency of the sine wave (Hz)
-    args.constant = 0  # Constant offset for the sine wave
+    #env.dof_names: ['left_hip_pitch_joint', 'left_hip_roll_joint', 'left_hip_yaw_joint', 'left_knee_joint', 'left_ankle_pitch_joint', 'left_ankle_roll_joint', 
+    # 'right_hip_pitch_joint', 'right_hip_roll_joint', 'right_hip_yaw_joint', 'right_knee_joint', 'right_ankle_pitch_joint', 'right_ankle_roll_joint',
+    # 'waist_yaw_joint', 'waist_roll_joint', 'waist_pitch_joint', 
+    # 'left_shoulder_pitch_joint', 'left_shoulder_roll_joint', 'left_shoulder_yaw_joint', 'left_elbow_joint', 'left_wrist_roll_joint', 'left_wrist_pitch_joint', 'left_wrist_yaw_joint', 
+    # 'right_shoulder_pitch_joint', 'right_shoulder_roll_joint', 'right_shoulder_yaw_joint', 'right_elbow_joint', 'right_wrist_roll_joint', 'right_wrist_pitch_joint', 'right_wrist_yaw_joint']
+    args.joint_name = 'left_hip_yaw_joint'
+    # args.torque = 0
+    args.amplitude = 0  # Amplitude of the sine wave
+    args.frequency = 0  # Frequency of the sine wave (Hz)
+    args.constant = 0.5  # Constant offset for the sine wave
     args.log_dir = '/home/shanhe/AMP_for_hardware/legged_gym/data/g1_amp/PD_Gain_setting_play'
-    args.p_gain = 100.0
+    args.p_gain = 30.0
     args.d_gain = 0
-
+    #tensorboard --logdir=/home/shanhe/AMP_for_hardware/legged_gym/data/g1_amp/PD_Gain_setting_play
+    #python legged_gym/scripts/PD_Gain_setting_play.py --headless
     play(args)
