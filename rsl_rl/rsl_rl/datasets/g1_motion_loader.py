@@ -13,36 +13,39 @@ from rsl_rl.datasets import motion_util
 
 
 class AMPLoader:
-    # Constants for indexing into the motion data - specific to 36-value format
-    # 3 + 4 + 29 + 3 + 3 + 29 = 71
+
+    def set_data_index(self):
+        """Set data index for the motion data."""
+        # Constants for indexing into the motion data - specific to 36-value format
+        # 3 + 4 + num_dofs + 3 + 3 + num_dofs = 71
+        self.JOINT_POS_SIZE = len(self.selected_joint_indices) if self.selected_joint_indices else 29
+        self.JOINT_VEL_SIZE = self.JOINT_POS_SIZE
     
-    # Sizes of each component
-    POS_SIZE = 3
-    ROT_SIZE = 4
-    JOINT_POS_SIZE = 29  # 36 - 7 (root position and rotation)
+        # Sizes of each component
+        self.POS_SIZE = 3
+        self.ROT_SIZE = 4
     
-    # Derived velocities - these will be computed
-    LINEAR_VEL_SIZE = 3
-    ANGULAR_VEL_SIZE = 3
-    JOINT_VEL_SIZE = 29
+        # Derived velocities - these will be computed
+        self.LINEAR_VEL_SIZE = 3
+        self.ANGULAR_VEL_SIZE = 3
 
-    ROOT_POS_START_IDX = 0
-    ROOT_POS_END_IDX = ROOT_POS_START_IDX + POS_SIZE # 3
+        self.ROOT_POS_START_IDX = 0
+        self.ROOT_POS_END_IDX = self.ROOT_POS_START_IDX + self.POS_SIZE # 3
 
-    ROOT_ROT_START_IDX = ROOT_POS_END_IDX
-    ROOT_ROT_END_IDX = ROOT_ROT_START_IDX + ROT_SIZE # 7
+        self.ROOT_ROT_START_IDX = self.ROOT_POS_END_IDX
+        self.ROOT_ROT_END_IDX = self.ROOT_ROT_START_IDX + self.ROT_SIZE # 7
 
-    JOINT_POS_START_IDX = ROOT_ROT_END_IDX
-    JOINT_POS_END_IDX = JOINT_POS_START_IDX + JOINT_POS_SIZE # 36
+        self.JOINT_POS_START_IDX = self.ROOT_ROT_END_IDX
+        self.JOINT_POS_END_IDX = self.JOINT_POS_START_IDX + self.JOINT_POS_SIZE # 7 + num_dofs
 
-    LINEAR_VEL_START_IDX = JOINT_POS_END_IDX
-    LINEAR_VEL_END_IDX = LINEAR_VEL_START_IDX + LINEAR_VEL_SIZE # 39
+        self.LINEAR_VEL_START_IDX = self.JOINT_POS_END_IDX
+        self.LINEAR_VEL_END_IDX = self.LINEAR_VEL_START_IDX + self.LINEAR_VEL_SIZE # 10 + num_dofs
 
-    ANGULAR_VEL_START_IDX = LINEAR_VEL_END_IDX
-    ANGULAR_VEL_END_IDX = ANGULAR_VEL_START_IDX + ANGULAR_VEL_SIZE # 42
+        self.ANGULAR_VEL_START_IDX = self.LINEAR_VEL_END_IDX
+        self.ANGULAR_VEL_END_IDX = self.ANGULAR_VEL_START_IDX + self.ANGULAR_VEL_SIZE # 13 + num_dofs
 
-    JOINT_VEL_START_IDX = ANGULAR_VEL_END_IDX
-    JOINT_VEL_END_IDX = JOINT_VEL_START_IDX + JOINT_VEL_SIZE # 71
+        self.JOINT_VEL_START_IDX = self.ANGULAR_VEL_END_IDX
+        self.JOINT_VEL_END_IDX = self.JOINT_VEL_START_IDX + self.JOINT_VEL_SIZE # 13 + 2 * num_dofs
 
     
     
@@ -54,6 +57,7 @@ class AMPLoader:
             preload_transitions=False,
             num_preload_transitions=1000000,
             motion_files=glob.glob('datasets/motion_files2/*'),
+            selected_joint_indices=None  # 新增参数：你想要保留的关节索引列表
             ):
         """Expert dataset provides AMP observations from motion dataset.
 
@@ -61,6 +65,9 @@ class AMPLoader:
         """
         self.device = device
         self.time_between_frames = time_between_frames
+        self.selected_joint_indices = selected_joint_indices
+        self.num_dofs = len(selected_joint_indices)
+        self.set_data_index()
         
         # Values to store for each trajectory
         self.trajectories = []
@@ -95,7 +102,10 @@ class AMPLoader:
                                 # Split by comma and convert to float
                                 values = [float(x) for x in line.strip().split(',')]
                                 if len(values) == 36:  # Ensure line has expected number of values
-                                    motion_data.append(values)
+                                    motion_data.append(values[:7])
+                                    for j in self.selected_joint_indices:
+                                        # Append the joint positions for the selected indices
+                                        motion_data[-1].append(values[j+7])
                         else:
                             # Assume it's a text file with space-separated values
                             f.seek(0)
@@ -105,11 +115,14 @@ class AMPLoader:
                                 # Clean the line and split by whitespace
                                 values = [float(x) for x in line.strip().split()]
                                 if len(values) == 36:  # Ensure line has expected number of values
-                                    motion_data.append(values)
+                                    motion_data.append(values[:7])
+                                    for j in self.selected_joint_indices:
+                                        # Append the joint positions for the selected indices
+                                        motion_data[-1].append(values[j+7])
                         motion_data = np.array(motion_data)
                         frame_duration = 1.0/30.0  # Assume 30fps for text files
                         motion_weight = 1.0
-                
+            
                 # Normalize and standardize quaternions
                 for f_i in range(motion_data.shape[0]):
                     root_rot = self.get_root_rot(motion_data[f_i])
@@ -147,6 +160,11 @@ class AMPLoader:
                         
                         # Convert to axis-angle representation
                         axis, angle = pose3d.QuaternionToAxisAngle(quat_diff)
+
+                        # Ensure angle is in the range [0, pi]
+                        if angle > np.pi:
+                            angle = 2 * np.pi - angle
+                            axis = -axis
                         
                         # Angular velocity is axis * angle / dt
                         ang_vel[f_i] = axis * angle / dt
@@ -171,17 +189,30 @@ class AMPLoader:
                 # Store all computed velocities as properties in the class
                 self.lin_vel = torch.tensor(lin_vel, dtype=torch.float32, device=device)
                 self.ang_vel = torch.tensor(ang_vel, dtype=torch.float32, device=device)
+                # if self.selected_joint_indices is not None:
+                #     joint_vel = joint_vel[:, self.selected_joint_indices]
+
                 self.joint_vel = torch.tensor(joint_vel, dtype=torch.float32, device=device)
+
                 
                 # Store trajectory data (without the first 7 dimensions for regular traj)
+                # if self.selected_joint_indices is not None:
+                #     joint_data = motion_data[:, self.JOINT_POS_START_IDX:self.JOINT_POS_END_IDX]
+                #     joint_data = joint_data[:, self.selected_joint_indices]  # 只选中指定索引
+                # else:
+                # joint_data = motion_data[:, self.JOINT_POS_START_IDX:self.JOINT_POS_END_IDX]
+
                 self.trajectories.append(torch.tensor(
                     motion_data[:, self.JOINT_POS_START_IDX:self.JOINT_POS_END_IDX],
                     dtype=torch.float32, device=device))
+
                 
                 # Store full trajectory data with velocities
                 # Create an extended motion data array that includes original data and computed velocities
                 extended_motion_data = np.zeros((motion_data.shape[0], motion_data.shape[1] + self.LINEAR_VEL_SIZE + self.ANGULAR_VEL_SIZE + self.JOINT_VEL_SIZE))
+                print(f"extended_motion_data shape: {extended_motion_data.shape}")
                 extended_motion_data[:, :motion_data.shape[1]] = motion_data  # Original data
+                # Fill in the rest of the extended motion data
                 
                 # Add velocities
                 extended_motion_data[:, self.LINEAR_VEL_START_IDX:self.LINEAR_VEL_END_IDX] = lin_vel
@@ -191,12 +222,11 @@ class AMPLoader:
                 self.extended_traj.append(torch.tensor(
                     extended_motion_data[:, self.JOINT_POS_START_IDX:],
                     dtype=torch.float32, device=device))
-
+                print(f"extended_traj shape: {self.extended_traj[-1].shape}")
                 # Store extended data as tensor
                 self.trajectories_full.append(torch.tensor(
                     extended_motion_data,
                     dtype=torch.float32, device=device))
-                
                 self.trajectory_idxs.append(i)
                 self.trajectory_weights.append(motion_weight)
                 self.trajectory_frame_durations.append(frame_duration)
@@ -235,59 +265,47 @@ class AMPLoader:
         print(f'trajectories_full shape: {self.trajectories_full[0].shape}')
         print(f'all_trajectories_full shape: {self.all_trajectories_full.shape}')
         
-    @staticmethod
-    def get_root_pos(pose):
+    def get_root_pos(self, pose):
         """Get root position from a pose vector."""
-        return pose[AMPLoader.ROOT_POS_START_IDX:AMPLoader.ROOT_POS_END_IDX]
+        return pose[self.ROOT_POS_START_IDX:self.ROOT_POS_END_IDX]
 
-    @staticmethod
-    def get_root_pos_batch(poses):
+    def get_root_pos_batch(self, poses):
         """Get root positions from a batch of pose vectors."""
-        return poses[:, AMPLoader.ROOT_POS_START_IDX:AMPLoader.ROOT_POS_END_IDX]
+        return poses[:, self.ROOT_POS_START_IDX:self.ROOT_POS_END_IDX]
 
-    @staticmethod
-    def get_root_rot(pose):
+    def get_root_rot(self, pose):
         """Get root rotation from a pose vector."""
-        return pose[AMPLoader.ROOT_ROT_START_IDX:AMPLoader.ROOT_ROT_END_IDX]
+        return pose[self.ROOT_ROT_START_IDX:self.ROOT_ROT_END_IDX]
 
-    @staticmethod
-    def get_root_rot_batch(poses):
+    def get_root_rot_batch(self, poses):
         """Get root rotations from a batch of pose vectors."""
-        return poses[:, AMPLoader.ROOT_ROT_START_IDX:AMPLoader.ROOT_ROT_END_IDX]
+        return poses[:, self.ROOT_ROT_START_IDX:self.ROOT_ROT_END_IDX]
 
-    @staticmethod
-    def get_joint_pose(pose):
+    def get_joint_pose(self, pose):
         """Get joint poses from a pose vector."""
-        return pose[AMPLoader.JOINT_POS_START_IDX:AMPLoader.JOINT_POS_END_IDX]
+        return pose[self.JOINT_POS_START_IDX:self.JOINT_POS_END_IDX]
 
-    @staticmethod
-    def get_joint_pose_batch(poses):
+    def get_joint_pose_batch(self, poses):
         """Get joint poses from a batch of pose vectors."""
-        return poses[:, AMPLoader.JOINT_POS_START_IDX:AMPLoader.JOINT_POS_END_IDX]
+        return poses[:, self.JOINT_POS_START_IDX:self.JOINT_POS_END_IDX]
     
-    @staticmethod
-    def get_linear_vel(pose):
-        return pose[AMPLoader.LINEAR_VEL_START_IDX:AMPLoader.LINEAR_VEL_END_IDX]
+    def get_linear_vel(self, pose):
+        return pose[self.LINEAR_VEL_START_IDX:self.LINEAR_VEL_END_IDX]
     
-    @staticmethod
-    def get_linear_vel_batch(pose):
-        return pose[:, AMPLoader.LINEAR_VEL_START_IDX:AMPLoader.LINEAR_VEL_END_IDX]
+    def get_linear_vel_batch(self, pose):
+        return pose[:, self.LINEAR_VEL_START_IDX:self.LINEAR_VEL_END_IDX]
     
-    @staticmethod
-    def get_angular_vel(pose):
-        return pose[AMPLoader.ANGULAR_VEL_START_IDX:AMPLoader.ANGULAR_VEL_END_IDX]  
+    def get_angular_vel(self, pose):
+        return pose[self.ANGULAR_VEL_START_IDX:self.ANGULAR_VEL_END_IDX]  
 
-    @staticmethod
-    def get_angular_vel_batch(poses):
-        return poses[:, AMPLoader.ANGULAR_VEL_START_IDX:AMPLoader.ANGULAR_VEL_END_IDX]
+    def get_angular_vel_batch(self, poses):
+        return poses[:, self.ANGULAR_VEL_START_IDX:self.ANGULAR_VEL_END_IDX]
     
-    @staticmethod
-    def get_joint_vel(pose):
-        return pose[AMPLoader.JOINT_VEL_START_IDX:AMPLoader.JOINT_VEL_END_IDX]
+    def get_joint_vel(self, pose):
+        return pose[self.JOINT_VEL_START_IDX:self.JOINT_VEL_END_IDX]
 
-    @staticmethod
-    def get_joint_vel_batch(poses):
-        return poses[:, AMPLoader.JOINT_VEL_START_IDX:AMPLoader.JOINT_VEL_END_IDX]
+    def get_joint_vel_batch(self, poses):
+        return poses[:, self.JOINT_VEL_START_IDX:self.JOINT_VEL_END_IDX]
 
     def weighted_traj_idx_sample(self):
         """Get traj idx via weighted sampling."""

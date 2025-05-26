@@ -31,18 +31,20 @@ import glob
 
 from legged_gym.envs.base.g1_legged_robot_config import G1LeggedRobotCfg, G1LeggedRobotCfgPPO
 
-MOTION_FILES = glob.glob('datasets/g1/run1_subject2.csv')
+MOTION_FILES = glob.glob('datasets/g1/walk1_subject1_.csv')
 
 
 class G1LEGAMPCfg( G1LeggedRobotCfg ):
 
     class env( G1LeggedRobotCfg.env ):
         num_actions = 12
-        num_envs = 64
+        num_envs = 2048
         include_history_steps = None  # Number of steps of history to include.
         # 3 + 3 + 3 + 3 + 12 + 12 + 12 + 2 = 50
-        num_observations = 47
-        num_privileged_obs = 50
+        # num_observations = 47
+        # num_privileged_obs = 50
+        num_observations = 42 #original amp
+        num_privileged_obs = 48
         reference_state_initialization = True
         reference_state_initialization_prob = 0.85
         amp_motion_files = MOTION_FILES
@@ -110,6 +112,8 @@ class G1LEGAMPCfg( G1LeggedRobotCfg ):
         terminate_after_contacts_on = ["pelvis", "head", "hip", "wrist", "torso", "shoulder", "elbow", "knee"]
         self_collisions = 0 # 1 to disable, 0 to enable...bitwise filter
         flip_visual_attachments = False
+        selected_joint_indices = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+        terminate_after_base_z = 0.4
   
     class domain_rand:
         randomize_friction = False
@@ -189,11 +193,11 @@ class G1LEGAMPCfg( G1LeggedRobotCfg ):
             collision = 0.0
             action_rate = -0.01
             dof_pos_limits = -5.0
-            alive = 0.15
-            hip_pos = -1.0
-            contact_no_vel = -0.2
-            feet_swing_height = -20.0
-            contact = 0.18
+            # alive = 0.15
+            # hip_pos = -1.0
+            # contact_no_vel = -0.2
+            # feet_swing_height = -20.0
+            # contact = 0.18
 
     class commands:
         curriculum = False
@@ -202,7 +206,7 @@ class G1LEGAMPCfg( G1LeggedRobotCfg ):
         resampling_time = 5. # time before command are changed[s]
         heading_command = False # if true: compute ang vel command from heading error
         class ranges:
-            lin_vel_x = [-2.0, 18.0] # min max [m/s]
+            lin_vel_x = [-1.0, 4.0] # min max [m/s]
             lin_vel_y = [-0.1, 0.1]   # min max [m/s]
             ang_vel_yaw = [-0.2, 0.2]    # min max [rad/s]
             heading = [-3.14, 3.14]
@@ -211,7 +215,7 @@ class G1LEGAMPCfg( G1LeggedRobotCfg ):
     #     dt = 0.005
 
 class G1LEGAMPCfgPPO( G1LeggedRobotCfgPPO ):
-    runner_class_name = 'G1LEGAMPOnPolicyRunner'
+    runner_class_name = 'G1AMPOnPolicyRunner'
     class algorithm( G1LeggedRobotCfgPPO.algorithm ):
         entropy_coef = 0.01
         amp_replay_buffer_size = 1000000
@@ -219,13 +223,13 @@ class G1LEGAMPCfgPPO( G1LeggedRobotCfgPPO ):
         num_mini_batches = 4
 
     class runner( G1LeggedRobotCfgPPO.runner ):
-        run_name = 'g1_12_run_new_commandrand=False'
-        experiment_name = 'g1_12_run'
+        run_name = 'init_1'
+        experiment_name = 'g1_12_without_unitree'
         algorithm_class_name = 'AMPPPO'
         policy_class_name = 'ActorCritic'
-        max_iterations = 500000 # number of policy updates
+        max_iterations = 5000 # number of policy updates
 
-        amp_reward_coef = 0.01
+        amp_reward_coef = 0.02
         amp_motion_files = MOTION_FILES
         amp_num_preload_transitions = 2000000
         amp_task_reward_lerp = 0.3 # smaller to rely more on style reward(imitation)

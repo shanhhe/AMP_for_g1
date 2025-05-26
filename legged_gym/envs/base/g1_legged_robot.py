@@ -86,10 +86,13 @@ class G1LeggedRobot(BaseTask):
         self._init_buffers()
         self._prepare_reward_function()
         self.init_done = True
-
+        
         # 这里data仅用来reset
         if self.cfg.env.reference_state_initialization:
-            self.amp_loader = AMPLoader(motion_files=self.cfg.env.amp_motion_files, device=self.device, time_between_frames=self.dt*self.cfg.control.decimation)
+            self.amp_loader = AMPLoader(motion_files=self.cfg.env.amp_motion_files, device=self.device,
+                                        time_between_frames=self.dt*self.cfg.control.decimation, 
+                                        selected_joint_indices=self.cfg.asset.selected_joint_indices)
+                                        
 
     def reset(self):
         """ Reset all robots"""
@@ -544,8 +547,8 @@ class G1LeggedRobot(BaseTask):
         if torch.isnan(frames).any():
             print("NaN in AMP frames!")
             frames = torch.nan_to_num(frames)
-        self.dof_pos[env_ids] = AMPLoader.get_joint_pose_batch(frames)
-        self.dof_vel[env_ids] = AMPLoader.get_joint_vel_batch(frames)
+        self.dof_pos[env_ids] = self.amp_loader.get_joint_pose_batch(frames)
+        self.dof_vel[env_ids] = self.amp_loader.get_joint_vel_batch(frames)
         env_ids_int32 = env_ids.to(dtype=torch.int32)
         self.gym.set_dof_state_tensor_indexed(self.sim,
                                               gymtorch.unwrap_tensor(self.dof_state),
@@ -581,13 +584,13 @@ class G1LeggedRobot(BaseTask):
             env_ids (List[int]): Environemnt ids
         """
         # base position
-        root_pos = AMPLoader.get_root_pos_batch(frames)
+        root_pos = self.amp_loader.get_root_pos_batch(frames)
         root_pos[:, :2] = root_pos[:, :2] + self.env_origins[env_ids, :2]
         self.root_states[env_ids, :3] = root_pos
-        root_orn = AMPLoader.get_root_rot_batch(frames)
+        root_orn = self.amp_loader.get_root_rot_batch(frames)
         self.root_states[env_ids, 3:7] = root_orn
-        self.root_states[env_ids, 7:10] = quat_rotate(root_orn, AMPLoader.get_linear_vel_batch(frames))
-        self.root_states[env_ids, 10:13] = quat_rotate(root_orn, AMPLoader.get_angular_vel_batch(frames))
+        self.root_states[env_ids, 7:10] = quat_rotate(root_orn, self.amp_loader.get_linear_vel_batch(frames))
+        self.root_states[env_ids, 10:13] = quat_rotate(root_orn, self.amp_loader.get_angular_vel_batch(frames))
 
         env_ids_int32 = env_ids.to(dtype=torch.int32)
         self.gym.set_actor_root_state_tensor_indexed(self.sim,

@@ -49,6 +49,7 @@ class G1AMPOnPolicyRunner:
     def __init__(self,
                  env: VecEnv,
                  train_cfg,
+                 model_cfg,
                  log_dir=None,
                  device='cpu'):
 
@@ -56,6 +57,7 @@ class G1AMPOnPolicyRunner:
         self.alg_cfg = train_cfg["algorithm"]
         self.policy_cfg = train_cfg["policy"]
         self.device = device
+        self.model_cfg = model_cfg
         self.env = env
         if self.env.num_privileged_obs is not None:
             num_critic_obs = self.env.num_privileged_obs 
@@ -72,9 +74,9 @@ class G1AMPOnPolicyRunner:
                                                         **self.policy_cfg).to(self.device)
 
         amp_data = AMPLoader(
-            device, time_between_frames=self.env.dt*6, preload_transitions=True, # time_between_frames=self.env.dt*cfg.control.decimation
+            device, time_between_frames=self.env.dt*self.model_cfg['control']['decimation'], preload_transitions=True, # time_between_frames=self.env.dt*cfg.control.decimation
             num_preload_transitions=train_cfg['runner']['amp_num_preload_transitions'],
-            motion_files=self.cfg["amp_motion_files"])
+            motion_files=self.cfg["amp_motion_files"], selected_joint_indices=self.model_cfg['asset']['selected_joint_indices'])
         amp_normalizer = Normalizer(amp_data.observation_dim) # 71
         discriminator = AMPDiscriminator(
             amp_data.observation_dim * 2,
