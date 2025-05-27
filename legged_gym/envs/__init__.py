@@ -38,6 +38,7 @@ from .base.g1_legged_robot import G1LeggedRobot
 from .g1.g1_amp_env import G1AMPRobot
 from .g1_leg.g1leg_amp_config import G1LEGAMPCfg, G1LEGAMPCfgPPO
 from .g1_leg.g1leg_amp_env import G1LEGAMPRobot
+from .g1_21.g1_21_amp_env import G121AMPRobot
 from .g1_21.g1_21_amp_config import G121AMPCfg, G121AMPCfgPPO
 
 
@@ -51,5 +52,5 @@ task_registry.register( "a1_amp", LeggedRobot, A1AMPCfg(), A1AMPCfgPPO() )
 task_registry.register( "g1_amp", G1AMPRobot, G1AMPCfg(), G1AMPCfgPPO() )
 task_registry.register( "g1_leg", G1LeggedRobot, G1LEGAMPCfg(), G1LEGAMPCfgPPO() )
 # task_registry.register( "g1_leg", G1LEGAMPRobot, G1LEGAMPCfg(), G1LEGAMPCfgPPO() ) # unitree
-task_registry.register( "g1_21", G1AMPRobot, G121AMPCfg(), G121AMPCfgPPO() )  #unitree 21
-
+task_registry.register( "g1_21", G121AMPRobot, G121AMPCfg(), G121AMPCfgPPO() )  #unitree 21
+# task_registry.register("g1_21",G1LeggedRobot, G121AMPCfg(), G121AMPCfgPPO())

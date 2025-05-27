@@ -86,7 +86,7 @@ def play(args):
     logger = Logger(env.dt)
     robot_index = 0 # which robot is used for logging
     joint_index = 1 # which joint is used for logging
-    stop_state_log = 1000 # number of steps before plotting states
+    stop_state_log = 500 # number of steps before plotting states
     stop_rew_log = env.max_episode_length + 1 # number of steps before print average episode rewards
     camera_offset = np.array([2.0, 0.0, 1.0])  # Adjust this offset as needed
     robot_position = env.root_states[robot_index, :3].cpu().numpy()
