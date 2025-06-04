@@ -67,7 +67,7 @@ class AMPDiscriminator(nn.Module):
             else:
                 reward = amp_reward
             self.train()
-        return reward.squeeze(), amp_reward.squeeze(), d
+        return reward.squeeze(), task_reward.squeeze(), amp_reward.squeeze(), d
 
     def _lerp_reward(self, disc_r, task_r):
         r = (1.0 - self.task_reward_lerp) * disc_r + self.task_reward_lerp * task_r

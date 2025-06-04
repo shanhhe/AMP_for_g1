@@ -222,7 +222,6 @@ class AMPLoader:
                 self.extended_traj.append(torch.tensor(
                     extended_motion_data[:, self.JOINT_POS_START_IDX:],
                     dtype=torch.float32, device=device))
-                print(f"extended_traj shape: {self.extended_traj[-1].shape}")
                 # Store extended data as tensor
                 self.trajectories_full.append(torch.tensor(
                     extended_motion_data,
@@ -243,6 +242,12 @@ class AMPLoader:
         # Handle empty trajectory case
         if not self.trajectory_weights:
             raise ValueError("No valid motion files were loaded")
+        
+        # 以时间长度为权重进行归一化
+        for i in range(len(self.trajectory_weights)):
+            if self.trajectory_lens[i] <= 0:
+                raise ValueError(f"Trajectory {self.trajectory_names[i]} has non-positive length: {self.trajectory_lens[i]}")
+            self.trajectory_weights[i] *= self.trajectory_lens[i]
             
         # Trajectory weights are used to sample some trajectories more than others
         self.trajectory_weights = np.array(self.trajectory_weights) / np.sum(self.trajectory_weights)

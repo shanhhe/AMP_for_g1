@@ -231,7 +231,7 @@ class G1LeggedRobot(BaseTask):
             self.update_command_curriculum(env_ids)
         
         # reset robot states
-        if self.cfg.env.reference_state_initialization:
+        if self.cfg.env.reference_state_initialization and random.random() < self.cfg.env.reference_state_initialization_prob:
             frames = self.amp_loader.get_full_frame_batch(len(env_ids))
             self._reset_dofs_amp(env_ids, frames)
             self._reset_root_states_amp(env_ids, frames)
@@ -239,7 +239,10 @@ class G1LeggedRobot(BaseTask):
             self._reset_dofs(env_ids)
             self._reset_root_states(env_ids)
 
-        self._resample_commands(env_ids)
+        if self.cfg.commands.linear_increasing_commands_for_play:
+            self._zero_commands(env_ids)
+        else:
+            self._resample_commands(env_ids)
 
         if self.cfg.domain_rand.randomize_gains:
             new_randomized_gains = self.compute_randomized_gains(len(env_ids))
@@ -350,12 +353,12 @@ class G1LeggedRobot(BaseTask):
     def get_amp_observations(self):
         """ Get AMP observations
         """
-        # 29 + 6 + 3 + 3 + 29 + 1 = 71
-        joint_pos = self.dof_pos # 29
+        # 21 + 3 + 3 + 21 + 1 = 49
+        joint_pos = self.dof_pos # 21
         # foot_pos = self.foot_positions_in_pelvis_frame(self.dof_pos).to(self.device) # 6
         base_lin_vel = self.base_lin_vel # 3
         base_ang_vel = self.base_ang_vel # 3
-        joint_vel = self.dof_vel # 29
+        joint_vel = self.dof_vel # 21
         z_pos = self.root_states[:, 2:3] # 1
         # return torch.cat((joint_pos, foot_pos, base_lin_vel, base_ang_vel, joint_vel, z_pos), dim=-1)
         return torch.cat((joint_pos, base_lin_vel, base_ang_vel, joint_vel, z_pos), dim=-1)       
@@ -459,7 +462,10 @@ class G1LeggedRobot(BaseTask):
         """
         # 
         env_ids = (self.episode_length_buf % int(self.cfg.commands.resampling_time / self.dt)==0).nonzero(as_tuple=False).flatten()
-        self._resample_commands(env_ids)
+        if self.cfg.commands.linear_increasing_commands_for_play:
+            self._linear_commands(env_ids)
+        else:
+            self._resample_commands(env_ids)
         if self.cfg.commands.heading_command:
             forward = quat_apply(self.base_quat, self.forward_vec)
             heading = torch.atan2(forward[:, 1], forward[:, 0])
@@ -469,6 +475,34 @@ class G1LeggedRobot(BaseTask):
             self.measured_heights = self._get_heights()
         if self.cfg.domain_rand.push_robots and  (self.common_step_counter % self.cfg.domain_rand.push_interval == 0):
             self._push_robots()
+    
+    def _linear_commands(self, env_ids):
+        """ Randomly select commands of some environments
+            This function is used for curriculum learning, where the command range is linearly increased
+            over time. It is called every self.cfg.commands.resampling_time steps.
+
+        Args:
+            env_ids (List[int]): Environments ids for which new commands are needed
+        """
+        if self.cfg.commands.linear_decreasing_commands_for_play:
+            self.commands[env_ids, 0] -= torch.ones_like(self.commands[env_ids, 0]) * self.cfg.commands.increasing_scale
+        else:
+            self.commands[env_ids, 0] += torch.ones_like(self.commands[env_ids, 0]) * self.cfg.commands.increasing_scale
+
+    def _zero_commands(self, env_ids):
+        """ Set commands of some environments to zero.
+            This function is used for curriculum learning, where the command range is linearly decreased
+            over time. It is called every self.cfg.commands.resampling_time steps.
+
+        Args:
+            env_ids (List[int]): Environments ids for which new commands are needed
+        """
+        self.commands[env_ids, 0] = 0.
+        self.commands[env_ids, 1] = 0.
+        if self.cfg.commands.heading_command:
+            self.commands[env_ids, 3] = 0.
+        else:
+            self.commands[env_ids, 2] = 0.
 
     def _resample_commands(self, env_ids):
         """ Randommly select commands of some environments
@@ -946,18 +980,18 @@ class G1LeggedRobot(BaseTask):
         rigid_shape_props_asset = self.gym.get_asset_rigid_shape_properties(robot_asset)
 
         # save body names from the asset
-        body_names = self.gym.get_asset_rigid_body_names(robot_asset)
+        self.body_names = self.gym.get_asset_rigid_body_names(robot_asset)
         self.dof_names = self.gym.get_asset_dof_names(robot_asset)
-        self.num_bodies = len(body_names)
+        self.num_bodies = len(self.body_names)
         self.num_dofs = len(self.dof_names)
-        feet_names = [s for s in body_names if self.cfg.asset.foot_name in s]
-        knee_names = [s for s in body_names if self.cfg.asset.knee_name in s]
+        feet_names = [s for s in self.body_names if self.cfg.asset.foot_name in s]
+        knee_names = [s for s in self.body_names if self.cfg.asset.knee_name in s]
         penalized_contact_names = []
         for name in self.cfg.asset.penalize_contacts_on:
-            penalized_contact_names.extend([s for s in body_names if name in s])
+            penalized_contact_names.extend([s for s in self.body_names if name in s])
         termination_contact_names = []
         for name in self.cfg.asset.terminate_after_contacts_on:
-            termination_contact_names.extend([s for s in body_names if name in s])
+            termination_contact_names.extend([s for s in self.body_names if name in s])
 
         base_init_state_list = self.cfg.init_state.pos + self.cfg.init_state.rot + self.cfg.init_state.lin_vel + self.cfg.init_state.ang_vel
         self.base_init_state = to_torch(base_init_state_list, device=self.device, requires_grad=False)

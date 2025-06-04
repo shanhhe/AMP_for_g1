@@ -126,9 +126,11 @@ class G1AMPOnPolicyRunner:
         rewbuffer = deque(maxlen=100)
         lenbuffer = deque(maxlen=100)
         amprewardbuffer = deque(maxlen=100)
+        taskrewardnbuffer = deque(maxlen=100)
         cur_reward_sum = torch.zeros(self.env.num_envs, dtype=torch.float, device=self.device)
         cur_episode_length = torch.zeros(self.env.num_envs, dtype=torch.float, device=self.device)
         cur_amp_reward_sum = torch.zeros(self.env.num_envs, dtype=torch.float, device=self.device)
+        cur_task_reward_sum = torch.zeros(self.env.num_envs, dtype=torch.float, device=self.device)
 
         tot_iter = self.current_learning_iteration + num_learning_iterations
         for it in range(self.current_learning_iteration, tot_iter):
@@ -148,7 +150,7 @@ class G1AMPOnPolicyRunner:
                     next_amp_obs_with_term = torch.clone(next_amp_obs)
                     next_amp_obs_with_term[reset_env_ids] = terminal_amp_states
 
-                    rewards, amp_rewards, _ = self.alg.discriminator.predict_amp_reward(
+                    rewards, task_rewards, amp_rewards, _ = self.alg.discriminator.predict_amp_reward(
                         amp_obs, next_amp_obs_with_term, rewards, normalizer=self.alg.amp_normalizer)
                     amp_obs = torch.clone(next_amp_obs)
                     self.alg.process_env_step(rewards, dones, infos, next_amp_obs_with_term)
@@ -159,13 +161,16 @@ class G1AMPOnPolicyRunner:
                             ep_infos.append(infos['episode'])
                         cur_reward_sum += rewards
                         cur_amp_reward_sum += amp_rewards
+                        cur_task_reward_sum += task_rewards
                         cur_episode_length += 1
                         new_ids = (dones > 0).nonzero(as_tuple=False)
                         rewbuffer.extend(cur_reward_sum[new_ids][:, 0].cpu().numpy().tolist())
                         lenbuffer.extend(cur_episode_length[new_ids][:, 0].cpu().numpy().tolist())
                         amprewardbuffer.extend(cur_amp_reward_sum[new_ids][:, 0].cpu().numpy().tolist())
+                        taskrewardnbuffer.extend(cur_task_reward_sum[new_ids][:, 0].cpu().numpy().tolist())
                         cur_reward_sum[new_ids] = 0
                         cur_amp_reward_sum[new_ids] = 0
+                        cur_task_reward_sum[new_ids] = 0
                         cur_episode_length[new_ids] = 0
 
                 stop = time.time()
@@ -220,6 +225,8 @@ class G1AMPOnPolicyRunner:
         self.writer.add_scalar('Perf/learning_time', locs['learn_time'], locs['it'])
         if len(locs['rewbuffer']) > 0:
             self.writer.add_scalar('Train/mean_reward', statistics.mean(locs['rewbuffer']), locs['it'])
+            self.writer.add_scalar('Train/mean_amp_reward', statistics.mean(locs['amprewardbuffer']), locs['it'])
+            self.writer.add_scalar('Train/mean_task_reward', statistics.mean(locs['taskrewardnbuffer']), locs['it'])
             self.writer.add_scalar('Train/mean_episode_length', statistics.mean(locs['lenbuffer']), locs['it'])
             self.writer.add_scalar('Train/mean_reward/time', statistics.mean(locs['rewbuffer']), self.tot_time)
             self.writer.add_scalar('Train/mean_episode_length/time', statistics.mean(locs['lenbuffer']), self.tot_time)
@@ -239,8 +246,9 @@ class G1AMPOnPolicyRunner:
                           f"""{'AMP mean expert pred:':>{pad}} {locs['mean_expert_pred']:.4f}\n"""
                           f"""{'Mean action noise std:':>{pad}} {mean_std.item():.2f}\n"""
                           f"""{'Mean reward:':>{pad}} {statistics.mean(locs['rewbuffer']):.2f}\n"""
-                          f"""{'Mean episode length:':>{pad}} {statistics.mean(locs['lenbuffer']):.2f}\n"""
-                          f"""{'Mean AMP rewards:':>{pad}} {statistics.mean(locs["amprewardbuffer"]):.2f}\n""")
+                          f"""{'Mean AMP rewards:':>{pad}} {statistics.mean(locs["amprewardbuffer"]):.2f}\n"""
+                          f"""{'Mean task rewards:':>{pad}} {statistics.mean(locs["taskrewardnbuffer"]):.2f}\n"""
+                          f"""{'Mean episode length:':>{pad}} {statistics.mean(locs['lenbuffer']):.2f}\n""")
 
                         #   f"""{'Mean reward/step:':>{pad}} {locs['mean_reward']:.2f}\n"""
                         #   f"""{'Mean episode length/episode:':>{pad}} {locs['mean_trajectory_length']:.2f}\n""")
