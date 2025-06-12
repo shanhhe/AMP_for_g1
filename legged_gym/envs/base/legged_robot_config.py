@@ -225,10 +225,10 @@ class LeggedRobotCfgPPO(BaseConfig):
         num_mini_batches = 4 # mini batch size = num_envs*nsteps / nminibatches
         learning_rate = 1.e-3 #5.e-4
         schedule = 'adaptive' # could be adaptive, fixed
-        gamma = 0.99
-        lam = 0.95
-        desired_kl = 0.01
-        max_grad_norm = 1.
+        gamma = 0.99 # discount factor
+        lam = 0.95 # Generalized Advantage Estimation(GAE)
+        desired_kl = 0.01 # desired KL divergence between old and new policy
+        max_grad_norm = 1. # max gradient norm for clipping
 
     class runner:
         policy_class_name = 'ActorCritic'

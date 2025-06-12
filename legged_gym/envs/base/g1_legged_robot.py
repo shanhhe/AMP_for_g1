@@ -90,7 +90,7 @@ class G1LeggedRobot(BaseTask):
         # 这里data仅用来reset
         if self.cfg.env.reference_state_initialization:
             self.amp_loader = AMPLoader(motion_files=self.cfg.env.amp_motion_files, device=self.device,
-                                        time_between_frames=self.dt*self.cfg.control.decimation, 
+                                        time_between_frames=self.dt, 
                                         selected_joint_indices=self.cfg.asset.selected_joint_indices)
                                         
 
@@ -343,8 +343,8 @@ class G1LeggedRobot(BaseTask):
             self.privileged_obs_buf += (2 * torch.rand_like(self.privileged_obs_buf) - 1) * self.noise_scale_vec
 
         # Remove velocity observations from policy observation.
-        if self.num_obs == self.num_privileged_obs - 6:
-            self.obs_buf = self.privileged_obs_buf[:, 6:]
+        if self.num_obs == self.num_privileged_obs - 3:
+            self.obs_buf = self.privileged_obs_buf[:, 3:]
         else:
             self.obs_buf = torch.clone(self.privileged_obs_buf)
 

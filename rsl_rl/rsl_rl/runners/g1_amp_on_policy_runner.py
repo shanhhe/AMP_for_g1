@@ -45,7 +45,14 @@ from rsl_rl.datasets.g1_motion_loader import AMPLoader
 from rsl_rl.utils.utils import Normalizer
 
 class G1AMPOnPolicyRunner:
-
+    """
+    Initialize Environment. VecEnv is a vectorized environment that allows for parallel execution of multiple environments.
+    Create An ActorCritic model.
+    Create an AMPDiscriminator for the AMP reward.
+    Create an AMPLoader to load AMP data.
+    Initialize PPO algorithm.
+    Store the training state such as log directory.
+    """
     def __init__(self,
                  env: VecEnv,
                  train_cfg,
@@ -74,7 +81,7 @@ class G1AMPOnPolicyRunner:
                                                         **self.policy_cfg).to(self.device)
 
         amp_data = AMPLoader(
-            device, time_between_frames=self.env.dt*self.model_cfg['control']['decimation'], preload_transitions=True, # time_between_frames=self.env.dt*cfg.control.decimation
+            device, time_between_frames=self.env.dt, preload_transitions=True,
             num_preload_transitions=train_cfg['runner']['amp_num_preload_transitions'],
             motion_files=self.cfg["amp_motion_files"], selected_joint_indices=self.model_cfg['asset']['selected_joint_indices'])
         amp_normalizer = Normalizer(amp_data.observation_dim) # 71
@@ -139,6 +146,7 @@ class G1AMPOnPolicyRunner:
             with torch.inference_mode():
                 for i in range(self.num_steps_per_env):
                     # self.alg -> AMPPPO
+                    # Collect actions from the PPO
                     actions = self.alg.act(obs, critic_obs, amp_obs)
                     obs, privileged_obs, rewards, dones, infos, reset_env_ids, terminal_amp_states = self.env.step(actions)
                     next_amp_obs = self.env.get_amp_observations()
@@ -178,8 +186,10 @@ class G1AMPOnPolicyRunner:
 
                 # Learning step
                 start = stop
+                # for Generalized Advantage Estimation（GAE)
                 self.alg.compute_returns(critic_obs)
             
+            # PPO update
             mean_value_loss, mean_surrogate_loss, mean_amp_loss, mean_grad_pen_loss, mean_policy_pred, mean_expert_pred = self.alg.update()
             stop = time.time()
             learn_time = stop - start
@@ -231,46 +241,47 @@ class G1AMPOnPolicyRunner:
             self.writer.add_scalar('Train/mean_reward/time', statistics.mean(locs['rewbuffer']), self.tot_time)
             self.writer.add_scalar('Train/mean_episode_length/time', statistics.mean(locs['lenbuffer']), self.tot_time)
 
-        str = f" \033[1m Learning iteration {locs['it']}/{self.current_learning_iteration + locs['num_learning_iterations']} \033[0m "
+        if locs['it'] % 5 == 0:
+            str = f" \033[1m Learning iteration {locs['it']}/{self.current_learning_iteration + locs['num_learning_iterations']} \033[0m "
 
-        if len(locs['rewbuffer']) > 0:
-            log_string = (f"""{'#' * width}\n"""
-                          f"""{str.center(width, ' ')}\n\n"""
-                          f"""{'Computation:':>{pad}} {fps:.0f} steps/s (collection: {locs[
-                            'collection_time']:.3f}s, learning {locs['learn_time']:.3f}s)\n"""
-                          f"""{'Value function loss:':>{pad}} {locs['mean_value_loss']:.4f}\n"""
-                          f"""{'Surrogate loss:':>{pad}} {locs['mean_surrogate_loss']:.4f}\n"""
-                          f"""{'AMP loss:':>{pad}} {locs['mean_amp_loss']:.4f}\n"""
-                          f"""{'AMP grad pen loss:':>{pad}} {locs['mean_grad_pen_loss']:.4f}\n"""
-                          f"""{'AMP mean policy pred:':>{pad}} {locs['mean_policy_pred']:.4f}\n"""
-                          f"""{'AMP mean expert pred:':>{pad}} {locs['mean_expert_pred']:.4f}\n"""
-                          f"""{'Mean action noise std:':>{pad}} {mean_std.item():.2f}\n"""
-                          f"""{'Mean reward:':>{pad}} {statistics.mean(locs['rewbuffer']):.2f}\n"""
-                          f"""{'Mean AMP rewards:':>{pad}} {statistics.mean(locs["amprewardbuffer"]):.2f}\n"""
-                          f"""{'Mean task rewards:':>{pad}} {statistics.mean(locs["taskrewardnbuffer"]):.2f}\n"""
-                          f"""{'Mean episode length:':>{pad}} {statistics.mean(locs['lenbuffer']):.2f}\n""")
+            if len(locs['rewbuffer']) > 0:
+                log_string = (f"""{'#' * width}\n"""
+                            f"""{str.center(width, ' ')}\n\n"""
+                            f"""{'Computation:':>{pad}} {fps:.0f} steps/s (collection: {locs[
+                                'collection_time']:.3f}s, learning {locs['learn_time']:.3f}s)\n"""
+                            f"""{'Value function loss:':>{pad}} {locs['mean_value_loss']:.4f}\n"""
+                            f"""{'Surrogate loss:':>{pad}} {locs['mean_surrogate_loss']:.4f}\n"""
+                            f"""{'AMP loss:':>{pad}} {locs['mean_amp_loss']:.4f}\n"""
+                            f"""{'AMP grad pen loss:':>{pad}} {locs['mean_grad_pen_loss']:.4f}\n"""
+                            f"""{'AMP mean policy pred:':>{pad}} {locs['mean_policy_pred']:.4f}\n"""
+                            f"""{'AMP mean expert pred:':>{pad}} {locs['mean_expert_pred']:.4f}\n"""
+                            f"""{'Mean action noise std:':>{pad}} {mean_std.item():.2f}\n"""
+                            f"""{'Mean reward:':>{pad}} {statistics.mean(locs['rewbuffer']):.2f}\n"""
+                            f"""{'Mean AMP rewards:':>{pad}} {statistics.mean(locs["amprewardbuffer"]):.2f}\n"""
+                            f"""{'Mean task rewards:':>{pad}} {statistics.mean(locs["taskrewardnbuffer"]):.2f}\n"""
+                            f"""{'Mean episode length:':>{pad}} {statistics.mean(locs['lenbuffer']):.2f}\n""")
 
-                        #   f"""{'Mean reward/step:':>{pad}} {locs['mean_reward']:.2f}\n"""
-                        #   f"""{'Mean episode length/episode:':>{pad}} {locs['mean_trajectory_length']:.2f}\n""")
-        else:
-            log_string = (f"""{'#' * width}\n"""
-                          f"""{str.center(width, ' ')}\n\n"""
-                          f"""{'Computation:':>{pad}} {fps:.0f} steps/s (collection: {locs[
-                            'collection_time']:.3f}s, learning {locs['learn_time']:.3f}s)\n"""
-                          f"""{'Value function loss:':>{pad}} {locs['mean_value_loss']:.4f}\n"""
-                          f"""{'Surrogate loss:':>{pad}} {locs['mean_surrogate_loss']:.4f}\n"""
-                          f"""{'Mean action noise std:':>{pad}} {mean_std.item():.2f}\n""")
-                        #   f"""{'Mean reward/step:':>{pad}} {locs['mean_reward']:.2f}\n"""
-                        #   f"""{'Mean episode length/episode:':>{pad}} {locs['mean_trajectory_length']:.2f}\n""")
+                            #   f"""{'Mean reward/step:':>{pad}} {locs['mean_reward']:.2f}\n"""
+                            #   f"""{'Mean episode length/episode:':>{pad}} {locs['mean_trajectory_length']:.2f}\n""")
+            else:
+                log_string = (f"""{'#' * width}\n"""
+                            f"""{str.center(width, ' ')}\n\n"""
+                            f"""{'Computation:':>{pad}} {fps:.0f} steps/s (collection: {locs[
+                                'collection_time']:.3f}s, learning {locs['learn_time']:.3f}s)\n"""
+                            f"""{'Value function loss:':>{pad}} {locs['mean_value_loss']:.4f}\n"""
+                            f"""{'Surrogate loss:':>{pad}} {locs['mean_surrogate_loss']:.4f}\n"""
+                            f"""{'Mean action noise std:':>{pad}} {mean_std.item():.2f}\n""")
+                            #   f"""{'Mean reward/step:':>{pad}} {locs['mean_reward']:.2f}\n"""
+                            #   f"""{'Mean episode length/episode:':>{pad}} {locs['mean_trajectory_length']:.2f}\n""")
 
-        log_string += ep_string
-        log_string += (f"""{'-' * width}\n"""
-                       f"""{'Total timesteps:':>{pad}} {self.tot_timesteps}\n"""
-                       f"""{'Iteration time:':>{pad}} {iteration_time:.2f}s\n"""
-                       f"""{'Total time:':>{pad}} {self.tot_time:.2f}s\n"""
-                       f"""{'ETA:':>{pad}} {self.tot_time / (locs['it'] + 1) * (
-                               locs['num_learning_iterations'] - locs['it']):.1f}s\n""")
-        print(log_string)
+            log_string += ep_string
+            log_string += (f"""{'-' * width}\n"""
+                        f"""{'Total timesteps:':>{pad}} {self.tot_timesteps}\n"""
+                        f"""{'Iteration time:':>{pad}} {iteration_time:.2f}s\n"""
+                        f"""{'Total time:':>{pad}} {self.tot_time:.2f}s\n"""
+                        f"""{'ETA:':>{pad}} {self.tot_time / (locs['it'] + 1) * (
+                                locs['num_learning_iterations'] - locs['it']):.1f}s\n""")
+            print(log_string)
 
     def save(self, path, infos=None):
         torch.save({

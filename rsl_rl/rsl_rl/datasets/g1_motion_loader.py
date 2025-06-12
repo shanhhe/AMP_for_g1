@@ -17,7 +17,7 @@ class AMPLoader:
     def set_data_index(self):
         """Set data index for the motion data."""
         # Constants for indexing into the motion data - specific to 36-value format
-        # 3 + 4 + num_dofs + 3 + 3 + num_dofs = 71
+        # 3 + 4 + num_dofs + 3 + 3 + num_dofs = 55
         self.JOINT_POS_SIZE = len(self.selected_joint_indices) if self.selected_joint_indices else 29
         self.JOINT_VEL_SIZE = self.JOINT_POS_SIZE
     
@@ -105,7 +105,12 @@ class AMPLoader:
                                     motion_data.append(values[:7])
                                     for j in self.selected_joint_indices:
                                         # Append the joint positions for the selected indices
-                                        motion_data[-1].append(values[j+7])
+                                        if j == 13:
+                                            # Special case for 13th joint, which is the waist roll joint
+                                            motion_data[-1].append(values[j+7] * 0.1)
+                                        else:
+                                            # For other joints, append normally
+                                            motion_data[-1].append(values[j+7])
                         else:
                             # Assume it's a text file with space-separated values
                             f.seek(0)
@@ -168,6 +173,8 @@ class AMPLoader:
                         
                         # Angular velocity is axis * angle / dt
                         ang_vel[f_i] = axis * angle / dt
+                        ang_vel[f_i] = self.world_to_body(ang_vel[f_i], quat_curr)
+                        lin_vel[f_i] = self.world_to_body(lin_vel[f_i], quat_curr)
                     
                     # Compute joint velocities
                     joint_vel = np.zeros((motion_data.shape[0], self.JOINT_VEL_SIZE))
@@ -585,6 +592,18 @@ class AMPLoader:
                 s_next = torch.stack(s_next)
             
             yield s, s_next
+
+    def world_to_body(self, vec_w, quat_wb):
+        """
+        把世界系向量 vec_w (长度3) 旋到机体系。
+        """
+        # Pinocchio/pybullet 四元数顺序 = (x, y, z, w)；transformations 也如此
+        q_bw = transformations.quaternion_inverse(quat_wb)          # q^{-1}
+        vec_q = np.concatenate([vec_w, [0.0]])                       # (x,y,z,0)
+        rotated = transformations.quaternion_multiply(
+                    transformations.quaternion_multiply(q_bw, vec_q),
+                    quat_wb)[:3]
+        return rotated
 
     @property
     def observation_dim(self):

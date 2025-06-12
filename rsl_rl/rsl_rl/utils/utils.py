@@ -153,37 +153,37 @@ class Normalize(torch.nn.Module):
         return x
 
 
-def quaternion_slerp(q0, q1, fraction, spin=0, shortestpath=True):
-    """Batch quaternion spherical linear interpolation."""
+def quaternion_slerp(q0, q1, fraction, spin=0, shortestpath=True, eps=1e-8):
+    """Batch safe-slerp. 依然保持原接口。"""
 
-    out = torch.zeros_like(q0)
+    # 1) 归一化，确保后续点积/acos 合法
+    q0 = torch.nn.functional.normalize(q0, dim=-1)
+    q1 = torch.nn.functional.normalize(q1, dim=-1)
 
-    zero_mask = torch.isclose(fraction, torch.zeros_like(fraction)).squeeze()
-    ones_mask = torch.isclose(fraction, torch.ones_like(fraction)).squeeze()
-    out[zero_mask] = q0[zero_mask]
-    out[ones_mask] = q1[ones_mask]
-
-    d = torch.sum(q0 * q1, dim=-1, keepdim=True)
-    dist_mask = (torch.abs(torch.abs(d) - 1.0) < _EPS).squeeze()
-    out[dist_mask] = q0[dist_mask]
+    # 2) 点积并纠正最短路径
+    dot = (q0 * q1).sum(dim=-1, keepdim=True)          # shape (..., 1)
 
     if shortestpath:
-        d_old = torch.clone(d)
-        d = torch.where(d_old < 0, -d, d)
-        q1 = torch.where(d_old < 0, -q1, q1)
+        sign = torch.where(dot < 0, -1.0, 1.0)
+        q1 = q1 * sign
+        dot = dot * sign
 
-    angle = torch.acos(d) + spin * torch.pi
-    angle_mask = (torch.abs(angle) < _EPS).squeeze()
-    out[angle_mask] = q0[angle_mask]
+    # 3) **Clamp** 到合法区间，避免 acos NaN
+    dot = dot.clamp(-1.0, 1.0)
+    angle = torch.acos(dot) + spin * torch.pi          # shape (..., 1)
 
-    final_mask = torch.logical_or(zero_mask, ones_mask)
-    final_mask = torch.logical_or(final_mask, dist_mask)
-    final_mask = torch.logical_or(final_mask, angle_mask)
-    final_mask = torch.logical_not(final_mask)
+    # 4) 处理 angle≈0：令 sin(angle)=1 保证分母非零
+    sin_angle = torch.sin(angle)
+    small_angle = sin_angle.abs() < eps
+    sin_angle = torch.where(small_angle, torch.ones_like(sin_angle), sin_angle)
 
-    isin = 1.0 / angle
-    q0 *= torch.sin((1.0 - fraction) * angle) * isin
-    q1 *= torch.sin(fraction * angle) * isin
-    q0 += q1
-    out[final_mask] = q0[final_mask]
-    return out
+    # 5) 权重
+    w0 = torch.sin((1.0 - fraction) * angle) / sin_angle
+    w1 = torch.sin(fraction * angle) / sin_angle
+
+    # 6) 当 angle≈0 时退化为线性插值
+    w0 = torch.where(small_angle, 1.0 - fraction, w0)
+    w1 = torch.where(small_angle, fraction, w1)
+
+    out = w0 * q0 + w1 * q1
+    return torch.nn.functional.normalize(out, dim=-1)
