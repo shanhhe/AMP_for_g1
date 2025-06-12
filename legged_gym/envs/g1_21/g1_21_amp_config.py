@@ -31,7 +31,7 @@ import glob
 
 from legged_gym.envs.base.g1_legged_robot_config import G1LeggedRobotCfg, G1LeggedRobotCfgPPO
 
-MOTION_FILES = glob.glob('datasets/customed_g1/walk2_single_forward.csv')  # Replace with your actual path to the motion files
+MOTION_FILES = glob.glob('datasets/customed_g1/walk1.csv')  # Replace with your actual path to the motion files
 
 
 class G121AMPCfg( G1LeggedRobotCfg ):
@@ -72,11 +72,9 @@ class G121AMPCfg( G1LeggedRobotCfg ):
 
             'left_shoulder_pitch_joint': 0.0,   # [rad]
             'left_shoulder_roll_joint': 0.0,   # [rad]
-            'left_shoulder_yaw_joint': 0.0,   # [rad]
             'left_elbow_joint': 0.0,   # [rad]
             'right_shoulder_pitch_joint': 0.0,   # [rad]
             'right_shoulder_roll_joint': 0.0,   # [rad]
-            'right_shoulder_yaw_joint': 0.0,   # [rad]
             'right_elbow_joint': 0.0,   # [rad]
         }
 
