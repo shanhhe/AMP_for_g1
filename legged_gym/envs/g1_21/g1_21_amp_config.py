@@ -31,23 +31,24 @@ import glob
 
 from legged_gym.envs.base.g1_legged_robot_config import G1LeggedRobotCfg, G1LeggedRobotCfgPPO
 
-MOTION_FILES = glob.glob('datasets/g1/walk1_subject1_.csv')
+MOTION_FILES = glob.glob('datasets/customed_g1/walk2_single_forward.csv')  # Replace with your actual path to the motion files
 
 
 class G121AMPCfg( G1LeggedRobotCfg ):
 
     class env( G1LeggedRobotCfg.env ):
         num_actions = 21
-        num_envs = 2048
+        num_envs = 4096
         include_history_steps = None  # Number of steps of history to include.
         # 3 + 3 + 3 + 3 + 21 + 21 + 21 + 2 = 77
         # num_observations = 74
         # num_privileged_obs = 77
-        num_observations = 69 #original amp
+        num_observations = 72 #original amp
         num_privileged_obs = 75
         reference_state_initialization = True
-        reference_state_initialization_prob = 0.85
+        reference_state_initialization_prob = 0.95
         amp_motion_files = MOTION_FILES
+        episode_length_s = 20 # episode length in seconds
 
     class init_state( G1LeggedRobotCfg.init_state ):
         pos = [0.0, 0.0, 0.8] # x,y,z [m]
@@ -86,8 +87,8 @@ class G121AMPCfg( G1LeggedRobotCfg ):
                      'hip_roll': 100,
                      'hip_pitch': 100,
                      'waist_yaw': 300,
-                     'waist_roll': 300,
-                     'waist_pitch': 300,
+                     'waist_roll': 90,
+                     'waist_pitch': 80,
                      'knee': 150,
                      'ankle': 40,
                      'shoulder_pitch': 90,
@@ -101,8 +102,8 @@ class G121AMPCfg( G1LeggedRobotCfg ):
                      'hip_roll': 2,
                      'hip_pitch': 2,
                      'waist_yaw': 3,
-                     'waist_roll': 3,
-                     'waist_pitch': 3,
+                     'waist_roll': 0.8,
+                     'waist_pitch': 2,
                      'knee': 4,
                      'ankle': 2,
                      'shoulder_pitch': 2,
@@ -127,11 +128,11 @@ class G121AMPCfg( G1LeggedRobotCfg ):
         file = '{LEGGED_GYM_ROOT_DIR}/resources/robots/g1_description/g1_15dof.urdf'
         name = 'g1_amp'
         foot_name = "ankle_roll"
-        penalize_contacts_on = ["hip", "knee"]
+        penalize_contacts_on = ["head", "hip", "wrist", "torso", "shoulder", "elbow", "knee"]
         knee_name = "knee"
         # terminate_after_contacts_on = ["pelvis", "head", "hip", "wrist", "torso", "shoulder", "elbow", "knee"]
-        terminate_after_contacts_on = ["pelvis", "head", "hip", "wrist", "torso", "shoulder", "elbow", "knee"]
-        self_collisions = 1 # 1 to disable, 0 to enable...bitwise filter
+        terminate_after_contacts_on = ["pelvis"]
+        self_collisions = 0 # 1 to disable, 0 to enable...bitwise filter
         flip_visual_attachments = False
         terminate_after_base_z = 0.4
         selected_joint_indices = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11,
@@ -139,19 +140,19 @@ class G121AMPCfg( G1LeggedRobotCfg ):
                                     15, 16, 18, 22, 23, 25]  # 指定你想保留的关节索引
         
     class domain_rand:
-        randomize_friction = False
+        randomize_friction = True
         friction_range = [0.1, 1.25]
-        randomize_base_mass = False
+        randomize_base_mass = True
         added_mass_range = [-1., 3.]
-        push_robots = False
+        push_robots = True
         push_interval_s = 5
         max_push_vel_xy = 1.5
-        randomize_gains = False
+        randomize_gains = True
         stiffness_multiplier_range = [0.9, 1.1]
         damping_multiplier_range = [0.9, 1.1]
 
     class noise:
-        add_noise = False
+        add_noise = True
         noise_level = 1.0 # scales other values
         class noise_scales:
             dof_pos = 0.03
@@ -204,23 +205,23 @@ class G121AMPCfg( G1LeggedRobotCfg ):
             # stance_swing_coordination = 2.0
             # swing_height = 0.5
 
-            tracking_lin_vel = 4.0
-            tracking_ang_vel = 2.0
+            tracking_lin_vel = 8.0
+            tracking_ang_vel = 6.0
             lin_vel_z = -2.0
             ang_vel_xy = -0.05
-            orientation = -1.0
+            orientation = 1.0
             base_height = -10.0
             dof_acc = -2.5e-7
             dof_vel = -1e-3
             feet_air_time = 0.0
-            collision = 0.0
+            collision = -5.0
             action_rate = -0.01
             dof_pos_limits = -5.0
-            # alive = 0.15
-            # hip_pos = -1.0
-            # contact_no_vel = -0.2
-            # feet_swing_height = -20.0
-            # contact = 0.18
+            # minimize_torso_angular_velocity = 2.0
+            # minimize_waist_pitch_deviation = 1.0
+            # minimize_waist_roll_deviation = 1.0
+            # minimize_waist_yaw_deviation = 0.2
+            # torso_yaw_smoothness = 0.2
 
     class commands:
         curriculum = False
@@ -228,8 +229,10 @@ class G121AMPCfg( G1LeggedRobotCfg ):
         num_commands = 4 # default: lin_vel_x, lin_vel_y, ang_vel_yaw, heading (in heading mode ang_vel_yaw is recomputed from heading error)
         resampling_time = 5. # time before command are changed[s]
         heading_command = False # if true: compute ang vel command from heading error
+        linear_increasing_commands_for_play = False # if true: increase the linear velocity commands during play
+        linear_decreasing_commands_for_play = False
         class ranges:
-            lin_vel_x = [-1.0, 2.5] # min max [m/s]
+            lin_vel_x = [0.0, 1.5] # min max [m/s]
             lin_vel_y = [-1.0, 1.0]   # min max [m/s]
             ang_vel_yaw = [-1.0, 1.0]    # min max [rad/s]
             heading = [-3.14, 3.14]
@@ -246,13 +249,13 @@ class G121AMPCfgPPO( G1LeggedRobotCfgPPO ):
         num_mini_batches = 4
 
     class runner( G1LeggedRobotCfgPPO.runner ):
-        run_name = 'May26_22-43-23_waistkp300kd3'
-        experiment_name = 'g1_21'
+        run_name = 'walk_single_forward'
+        experiment_name = 'single_motion'
         algorithm_class_name = 'AMPPPO'
         policy_class_name = 'ActorCritic'
-        max_iterations = 20000 # number of policy updates
+        max_iterations = 50000 # number of policy updates
 
-        amp_reward_coef = 0.02
+        amp_reward_coef = 0.3
         amp_motion_files = MOTION_FILES
         amp_num_preload_transitions = 2000000
         amp_task_reward_lerp = 0.3 # smaller to rely more on style reward(imitation)
