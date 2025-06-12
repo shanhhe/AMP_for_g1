@@ -30,6 +30,7 @@
 
 import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.colors import ListedColormap
 from collections import defaultdict
 from multiprocessing import Process, Value
 import datetime
@@ -61,11 +62,150 @@ class Logger:
         self.state_log.clear()
         self.rew_log.clear()
 
-    def plot_states(self):
-        self.plot_process = Process(target=self._plot)
+    def plot_states(self,run_name=None):
+        self.plot_process = Process(target=self._plot(run_name))
         self.plot_process.start()
 
-    def _plot(self):
+    def plot_single_state(self, key, run_name=None):
+        self.plot_process = Process(target=self._plot_single_state(key, run_name))
+        self.plot_process.start()
+
+    def plot_waist_states(self, run_name=None):
+        self.plot_process = Process(target=self._plot_waist(run_name))
+        self.plot_process.start()
+
+    def plot_contact_phase(self, run_name=None):
+        self.plot_process = Process(target=self._plot_contact_phase(run_name))
+        self.plot_process.start()
+
+    def _plot_contact_phase(self, run_name=None):
+        nb_rows = 2
+        nb_cols = 1
+        fig, axs = plt.subplots(nb_rows, nb_cols, figsize=(24, 12), sharex=True,
+                                gridspec_kw={'height_ratios':[2,3]})
+        for key, value in self.state_log.items():
+            time = np.linspace(0, len(value)*self.dt, len(value))
+            break
+        log = self.state_log
+
+        forces = np.array(log["contact_forces_z"])
+        left_contact = forces[:, 0] > 1
+        right_contact = forces[:, 1] > 1
+        v_cmd = log["command_x"]
+        v_act = log["base_vel_x"]
+
+        phase_disp = np.full((4, len(time)), np.nan)  # Full of NaN
+
+        for k, (l, r) in enumerate(zip(left_contact, right_contact)):
+            if l and r:         phase_disp[0, k] = 0  # Double
+            elif not l and r:   phase_disp[1, k] = 1  # Right
+            elif l and not r:   phase_disp[2, k] = 2  # Left
+            else:               phase_disp[3, k] = 3  # Flight
+
+        # Create a colormap for the phases
+        cmap = ListedColormap(['black', 'red', 'blue', 'teal'])  # 0,1,2,3 correspond to four colors
+        cmap.set_bad(color='white')  # Set NaN to white (transparent)
+
+        # plot contact phase
+        a = axs[0]
+        im = a.imshow(phase_disp, aspect='auto', origin='lower',
+                      extent=[time[0], time[-1], 0, 4],
+                      cmap=cmap, vmin=0, vmax=3)
+        a.set_yticks(np.arange(0.5, 4.5))
+        a.set_yticklabels(['Double', 'Right', 'Left', 'Flight'])
+        a.set_ylabel('Support Phase')
+        a.set_xlim(time[0], time[-1])
+        
+        # plot base velocity x
+        a = axs[1]
+        a.step(time, v_cmd, where='post', label='Commanded', linewidth=2)
+        a.plot(time, v_act, 'r', label='Actual', linewidth=1)
+        a.set_xlabel('Time [s]')
+        a.set_ylabel('Base Velocity X [m/s]')
+        a.legend()
+        a.grid(True)
+        
+        # plt.xticks(np.arange(0, len(value)*self.dt, 1), rotation=45)
+        plt.tight_layout()
+        
+        # Save the figure
+        log_dir = '/home/shanhe/AMP_for_hardware/legged_gym/data/'
+        log_dir = os.path.join(log_dir, 'contact_phase')
+        if not os.path.exists(log_dir):
+            os.makedirs(log_dir)
+        fig.savefig(os.path.join(log_dir, f'{run_name}.png'), dpi=600, bbox_inches='tight')
+
+
+    def _plot_single_state(self, keys, run_name=None):
+        nb_rows = len(keys)
+        nb_cols = 1
+        fig, axs = plt.subplots(nb_rows, nb_cols, figsize=(20, 8), sharex=True)
+        for _, value in self.state_log.items():
+            time = np.linspace(0, len(value)*self.dt, len(value))
+            break
+        log = self.state_log
+        for i, key in enumerate(keys):
+            if key not in log:
+                print(f"Key '{key}' not found in state log.")
+                return
+            axs[i].plot(time, log[key], label=key)
+            axs[i].set(xlabel='time [s]', ylabel='Value', title=f'{key} over time')
+            axs[i].grid(True)
+            axs[i].legend()
+            mean = np.mean(log[key])
+            print(f"Mean of {key}: {mean}")
+        # plt.xticks(np.arange(0, len(value)*self.dt, 1), rotation=45)
+        plt.tight_layout()
+        # Save the figure
+        log_dir = '/home/shanhe/AMP_for_hardware/legged_gym/data/'
+        log_dir = os.path.join(log_dir, 'before_symmetry')
+        if not os.path.exists(log_dir):
+            os.makedirs(log_dir)
+        fig.savefig(os.path.join(log_dir, f'{key}_{run_name}.png'), dpi=300, bbox_inches='tight')
+
+
+    def _plot_waist(self, run_name=None):
+        nb_rows = 3
+        nb_cols = 1
+        fig, axs = plt.subplots(nb_rows, nb_cols, figsize=(18, 12), sharex=True)
+        for key, value in self.state_log.items():
+            time = np.linspace(0, len(value)*self.dt, len(value))
+            break
+        log = self.state_log
+
+        # plot waist yaw
+        a = axs[0]
+        if log["waist_yaw_joint"]: a.plot(time, log["waist_yaw_joint"], label='measured')
+        if log["waist_yaw_joint_target"]: a.plot(time, log["waist_yaw_joint_target"], label='target')
+        a.set(xlabel='time [s]', ylabel='Angle [rad]', title='Waist Yaw Joint')
+        a.grid(True)
+        # a.legend()
+        # plot waist roll
+        a = axs[1]
+        if log["waist_roll_joint"]: a.plot(time, log["waist_roll_joint"], label='measured') 
+        if log["waist_roll_joint_target"]: a.plot(time, log["waist_roll_joint_target"], label='target')
+        a.set(xlabel='time [s]', ylabel='Angle [rad]', title='Waist Roll Joint')
+        a.grid(True)
+        a.legend()
+        # plot waist pitch
+        a = axs[2]
+        if log["waist_pitch_joint"]: a.plot(time, log["waist_pitch_joint"], label='measured')
+        if log["waist_pitch_joint_target"]: a.plot(time, log["waist_pitch_joint_target"], label='target')
+        a.set(xlabel='time [s]', ylabel='Angle [rad]', title='Waist Pitch Joint')
+        a.grid(True)
+        a.legend()
+        plt.xticks(np.arange(0, len(value)*self.dt, 1), rotation=45)
+        plt.tight_layout()
+        # plt.show()
+        # Save the figure
+        # timestamp = datetime.datetime.now().strftime("%m%d-%H_%M_%S")
+        log_dir = '/home/shanhe/AMP_for_hardware/legged_gym/data/'
+        log_dir = os.path.join(log_dir, 'waist_traj')
+        if not os.path.exists(log_dir):
+            os.makedirs(log_dir)
+        fig.savefig(os.path.join(log_dir, f'{run_name}.png'), dpi=300, bbox_inches='tight')
+
+    def _plot(self, run_name=None):
         nb_rows = 3
         nb_cols = 3
         fig, axs = plt.subplots(nb_rows, nb_cols)
@@ -126,7 +266,12 @@ class Logger:
         if log["dof_torque"]!=[]: a.plot(time, log["dof_torque"], label='measured')
         a.set(xlabel='time [s]', ylabel='Joint Torque [Nm]', title='Torque')
         a.legend()
-        plt.show()
+        log_dir = '/home/shanhe/AMP_for_hardware/legged_gym/data/'
+        log_dir = os.path.join(log_dir, 'plot')
+        if not os.path.exists(log_dir):
+            os.makedirs(log_dir)
+        fig.savefig(os.path.join(log_dir, f'{run_name}.png'), dpi=300, bbox_inches='tight')
+        # plt.show()
 
     def print_rewards(self):
         print("Average rewards per second:")
@@ -146,7 +291,7 @@ class LoggerPD:
         self.dt = dt
         self.num_episodes = 0
         self.plot_process = None
-        self.log_dir = '/home/shanhe/unitree_rl_gym/legged_gym/data/bruce'
+        self.log_dir = '/home/shanhe/unitree_rl_gym/legged_gym/data'
         self.writer = None
 
     def log_state(self, key, value):
