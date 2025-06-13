@@ -62,14 +62,33 @@ def unpad_trajectories(trajectories, masks):
         .transpose(1, 0)
     )
 
-def store_code_state(logdir, repositories):
+def store_code_state(logdir, repositories) -> list:
+    git_log_dir = os.path.join(logdir, "git")
+    os.makedirs(git_log_dir, exist_ok=True)
+    file_paths = []
     for repository_file_path in repositories:
-        repo = git.Repo(repository_file_path, search_parent_directories=True)
+        try:
+            repo = git.Repo(repository_file_path, search_parent_directories=True)
+        except Exception:
+            print(f"Could not find git repository in {repository_file_path}. Skipping.")
+            # skip if not a git repository
+            continue
+        # get the name of the repository
         repo_name = pathlib.Path(repo.working_dir).name
         t = repo.head.commit.tree
-        content = f"--- git status ---\n{repo.git.status()} \n\n\n--- git diff ---\n{repo.git.diff(t)}"
-        with open(os.path.join(logdir, f"{repo_name}_git.diff"), "x") as f:
+        diff_file_name = os.path.join(git_log_dir, f"{repo_name}.diff")
+        # check if the diff file already exists
+        if os.path.isfile(diff_file_name):
+            continue
+        # write the diff file
+        print(f"Storing git diff for '{repo_name}' in: {diff_file_name}")
+        with open(diff_file_name, "x") as f:
+            content = f"--- git status ---\n{repo.git.status()} \n\n\n--- git diff ---\n{repo.git.diff(t)}"
             f.write(content)
+        # add the file path to the list of files to be uploaded
+        file_paths.append(diff_file_name)
+    return file_paths
+            
 
 class RunningMeanStd(object):
     def __init__(self, epsilon: float = 1e-4, shape: Tuple[int, ...] = ()):

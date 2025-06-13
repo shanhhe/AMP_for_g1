@@ -89,8 +89,8 @@ class G1AMPOnPolicyRunner:
             self.obs_normalizer = EmpiricalNormalization(shape=[num_obs], until=1.0e8).to(self.device)
             self.critic_obs_normalizer = EmpiricalNormalization(shape=[num_critic_obs], until=1.0e8).to(self.device)
         else:
-            self.obs_normalizer = torch.nn.Identity() # no normalization
-            self.critic_obs_normalizer = torch.nn.Identity() # no normalization
+            self.obs_normalizer = torch.nn.Identity().to(self.device) # no normalization
+            self.critic_obs_normalizer = torch.nn.Identity().to(self.device) # no normalization
             
         # init storage and model
         self.alg.init_storage(
@@ -162,13 +162,9 @@ class G1AMPOnPolicyRunner:
                     # self.alg -> AMPPPO
                     # Collect actions from the PPO
                     actions = self.alg.act(obs, critic_obs, amp_obs)
-                    obs, rewards, dones, infos, reset_env_ids, terminal_amp_states = self.env.step(actions)
-                    obs = self.obs_normalizer(obs)
+                    obs, rewards, dones, infos, reset_env_ids, terminal_amp_states = self.env.step(actions.to(self.device))
                     next_amp_obs = self.env.get_amp_observations()
-                    if "critic" in infos["observations"]:
-                        critic_obs = self.critic_obs_normalizer(infos["observations"]["critic"])
-                    else:
-                        critic_obs = obs
+                    # move to the right device
                     obs, critic_obs, next_amp_obs, rewards, dones = (
                         obs.to(self.device),
                         critic_obs.to(self.device),
@@ -176,7 +172,13 @@ class G1AMPOnPolicyRunner:
                         rewards.to(self.device),
                         dones.to(self.device),
                     )
-
+                    # perform normalization
+                    obs = self.obs_normalizer(obs)
+                    if "critic" in infos["observations"]:
+                        critic_obs = self.critic_obs_normalizer(infos["observations"]["critic"])
+                    else:
+                        critic_obs = obs
+                    
                     # Account for terminal states.
                     next_amp_obs_with_term = torch.clone(next_amp_obs)
                     next_amp_obs_with_term[reset_env_ids] = terminal_amp_states
@@ -184,6 +186,7 @@ class G1AMPOnPolicyRunner:
                     rewards, task_rewards, amp_rewards, _ = self.alg.discriminator.predict_amp_reward(
                         amp_obs, next_amp_obs_with_term, rewards, normalizer=self.alg.amp_normalizer)
                     amp_obs = torch.clone(next_amp_obs)
+                    # process the step
                     self.alg.process_env_step(rewards, dones, infos, next_amp_obs_with_term)
                     
                     if self.log_dir is not None:
@@ -227,7 +230,12 @@ class G1AMPOnPolicyRunner:
                 self.save(os.path.join(self.log_dir, f"model_{it}.pt"))
             ep_infos.clear()
             if it == start_iter:
-                store_code_state(self.log_dir, self.git_status_repos)
+                # obtain all the diff files
+                git_file_paths = store_code_state(self.log_dir, self.git_status_repos)
+                # if possible store them to wandb
+                if self.logger_type in ["wandb", "neptune"] and git_file_paths:
+                    for path in git_file_paths:
+                        self.writer.save_file(path)
         
         self.save(os.path.join(self.log_dir, f"model_{self.current_learning_iteration}.pt"))
 
