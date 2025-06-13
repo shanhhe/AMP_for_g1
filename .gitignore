@@ -50,9 +50,16 @@ Thumbs.db
 
 # VS Code
 .vscode
+
 # logs
 logs
 runs
+
+# plots
+*.png
+
+# datasets
+*.csv
 
 # other
 *.egg-info

@@ -252,6 +252,7 @@ class G121AMPCfgPPO( G1LeggedRobotCfgPPO ):
         algorithm_class_name = 'AMPPPO'
         policy_class_name = 'ActorCritic'
         max_iterations = 50000 # number of policy updates
+        empirical_normalization = False
 
         amp_reward_coef = 0.3
         amp_motion_files = MOTION_FILES

@@ -144,15 +144,36 @@ class G1LeggedRobot(BaseTask):
             policy_obs = self.obs_buf
         if self.privileged_obs_buf is not None:
             self.privileged_obs_buf = torch.clip(self.privileged_obs_buf, -clip_obs, clip_obs)
+        # prepare extras
+        self.extras["observations"] = {}
+        self.extras["observations"]["critic"] = self.privileged_obs_buf
         
-        return policy_obs, self.privileged_obs_buf, self.rew_buf, self.reset_buf, self.extras, reset_env_ids, terminal_amp_states
+        return policy_obs, self.rew_buf, self.reset_buf, self.extras, reset_env_ids, terminal_amp_states
 
     def get_observations(self):
+        """
+        Returns
+        -------
+        policy_obs : np.ndarray
+            Observation tensor fed to the actor / policy network.
+        extras : dict
+            Contains a separate critic-level observation.
+            extras["observations"]["critic"] is guaranteed to exist.
+        """
         if self.cfg.env.include_history_steps is not None:
-            policy_obs = self.obs_buf_history.get_obs_vec(np.arange(self.include_history_steps))
+            policy_obs = self.obs_buf_history.get_obs_vec(
+                np.arange(self.cfg.env.include_history_steps)
+            )
         else:
             policy_obs = self.obs_buf
-        return policy_obs
+
+        critic_obs = self.privileged_obs_buf
+        extras = {
+            "observations": {
+                "critic": critic_obs   #  # Critic-level observation
+            }
+        }
+        return policy_obs, extras
 
     def post_physics_step(self):
         """ check terminations, compute observations and rewards

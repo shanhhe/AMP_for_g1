@@ -1,32 +1,7 @@
-# SPDX-FileCopyrightText: Copyright (c) 2021 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-# SPDX-License-Identifier: BSD-3-Clause
-# 
-# Redistribution and use in source and binary forms, with or without
-# modification, are permitted provided that the following conditions are met:
-#
-# 1. Redistributions of source code must retain the above copyright notice, this
-# list of conditions and the following disclaimer.
-#
-# 2. Redistributions in binary form must reproduce the above copyright notice,
-# this list of conditions and the following disclaimer in the documentation
-# and/or other materials provided with the distribution.
-#
-# 3. Neither the name of the copyright holder nor the names of its
-# contributors may be used to endorse or promote products derived from
-# this software without specific prior written permission.
-#
-# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
-# AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
-# IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
-# DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
-# FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
-# DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
-# SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
-# CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
-# OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-# OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-#
-# Copyright (c) 2021 ETH Zurich, Nikita Rudin
+#  Copyright 2021 ETH Zurich, NVIDIA CORPORATION
+#  SPDX-License-Identifier: BSD-3-Clause
+
+from __future__ import annotations
 
 import torch
 import torch.nn as nn
@@ -55,7 +30,7 @@ class AMPPPO:
                  use_clipped_value_loss=True,
                  schedule="fixed",
                  desired_kl=0.01,
-                 device='cpu',
+                 device="cpu",
                  amp_replay_buffer_size=100000,
                  min_std=None,
                  ):
@@ -134,9 +109,9 @@ class AMPPPO:
         self.transition.rewards = rewards.clone()
         self.transition.dones = dones
         # Bootstrapping on time outs
-        if 'time_outs' in infos:
-            self.transition.rewards += self.gamma * torch.squeeze(self.transition.values * infos['time_outs'].unsqueeze(1).to(self.device), 1)
-
+        if "time_outs" in infos:
+            self.transition.rewards += self.gamma * torch.squeeze(
+                self.transition.values * infos["time_outs"].unsqueeze(1).to(self.device), 1)
         not_done_idxs = (dones == False).nonzero().squeeze()
         self.amp_storage.insert(
             self.amp_transition.observations, amp_obs)
@@ -166,7 +141,6 @@ class AMPPPO:
             generator = self.storage.reccurent_mini_batch_generator(self.num_mini_batches, self.num_learning_epochs)
         else:
             generator = self.storage.mini_batch_generator(self.num_mini_batches, self.num_learning_epochs)
-        # 
         amp_policy_generator = self.amp_storage.feed_forward_generator(
             self.num_learning_epochs * self.num_mini_batches,
             self.storage.num_envs * self.storage.num_transitions_per_env //
@@ -197,7 +171,12 @@ class AMPPPO:
                 if self.desired_kl != None and self.schedule == 'adaptive':
                     with torch.inference_mode():
                         kl = torch.sum(
-                            torch.log(sigma_batch / old_sigma_batch + 1.e-5) + (torch.square(old_sigma_batch) + torch.square(old_mu_batch - mu_batch)) / (2.0 * torch.square(sigma_batch)) - 0.5, axis=-1)
+                        torch.log(sigma_batch / old_sigma_batch + 1.0e-5)
+                        + (torch.square(old_sigma_batch) + torch.square(old_mu_batch - mu_batch))
+                        / (2.0 * torch.square(sigma_batch))
+                        - 0.5,
+                        axis=-1,
+                    )
                         kl_mean = torch.mean(kl)
 
                         if kl_mean > self.desired_kl * 2.0:
@@ -212,14 +191,16 @@ class AMPPPO:
                 # Surrogate loss
                 ratio = torch.exp(actions_log_prob_batch - torch.squeeze(old_actions_log_prob_batch))
                 surrogate = -torch.squeeze(advantages_batch) * ratio
-                surrogate_clipped = -torch.squeeze(advantages_batch) * torch.clamp(ratio, 1.0 - self.clip_param,
-                                                                                1.0 + self.clip_param)
+                surrogate_clipped = -torch.squeeze(advantages_batch) * torch.clamp(
+                    ratio, 1.0 - self.clip_param, 1.0 + self.clip_param
+                )
                 surrogate_loss = torch.max(surrogate, surrogate_clipped).mean()
 
                 # Value function loss
                 if self.use_clipped_value_loss:
-                    value_clipped = target_values_batch + (value_batch - target_values_batch).clamp(-self.clip_param,
-                                                                                                    self.clip_param)
+                    value_clipped = target_values_batch + (value_batch - target_values_batch).clamp(
+                        -self.clip_param, self.clip_param
+                    )
                     value_losses = (value_batch - returns_batch).pow(2)
                     value_losses_clipped = (value_clipped - returns_batch).pow(2)
                     value_loss = torch.max(value_losses, value_losses_clipped).mean()
@@ -259,31 +240,13 @@ class AMPPPO:
                     self.entropy_coef * entropy_batch.mean() +
                     amp_loss + grad_pen_loss)
 
-                # Add before optimizer.zero_grad()
-                for name, param in self.actor_critic.named_parameters():
-                    if torch.isnan(param).any() or torch.isinf(param).any():
-                        print(f"NaN or Inf in parameter {name}")
-                        param.data = torch.nan_to_num(param.data)
-
                 # Gradient step
                 self.optimizer.zero_grad()
                 loss.backward()
 
-                # Check gradients for NaN
-                for name, param in self.actor_critic.named_parameters():
-                    if param.grad is not None and (torch.isnan(param.grad).any() or torch.isinf(param.grad).any()):
-                        print(f"NaN or Inf in gradient of {name}")
-                        param.grad = torch.nan_to_num(param.grad)
-
                 # Increase gradient clipping to handle potential large values
                 nn.utils.clip_grad_norm_(self.actor_critic.parameters(), self.max_grad_norm)
                 self.optimizer.step()
-
-                # After optimizer.step(), check parameters again
-                for name, param in self.actor_critic.named_parameters():
-                    if torch.isnan(param).any() or torch.isinf(param).any():
-                        print(f"NaN or Inf in parameter {name} after optimization step")
-                        param.data = torch.nan_to_num(param.data)
 
                 if not self.actor_critic.fixed_std and self.min_std is not None:
                     self.actor_critic.std.data = self.actor_critic.std.data.clamp(min=self.min_std)
