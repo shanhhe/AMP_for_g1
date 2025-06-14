@@ -8,6 +8,8 @@ import torch
 import torch.nn as nn
 from torch.distributions import Normal
 
+from rsl_rl.utils import resolve_nn_activation
+
 
 class ActorCritic(nn.Module):
     is_recurrent = False
@@ -20,6 +22,7 @@ class ActorCritic(nn.Module):
         critic_hidden_dims=[256, 256, 256],
         activation='elu',
         init_noise_std=1.0,
+        noise_std_type: str = "scalar",
         fixed_std=False,
         **kwargs,
     ):
@@ -30,7 +33,7 @@ class ActorCritic(nn.Module):
             )
         super().__init__()
 
-        activation = get_activation(activation)
+        activation = resolve_nn_activation(activation)
 
         mlp_input_dim_a = num_actor_obs
         mlp_input_dim_c = num_critic_obs
@@ -63,12 +66,22 @@ class ActorCritic(nn.Module):
         print(f"Critic MLP: {self.critic}")
 
         # Action noise
+        self.noise_std_type = noise_std_type
         self.fixed_std = fixed_std
-        std = init_noise_std * torch.ones(num_actions)
-        self.std = torch.tensor(std) if fixed_std else nn.Parameter(std)
+        if fixed_std:
+            self.std = torch.tensor(init_noise_std * torch.ones(num_actions))
+        else:
+            if self.noise_std_type == "scalar":
+                self.std = nn.Parameter(init_noise_std * torch.ones(num_actions))
+            elif self.noise_std_type == "log":
+                self.log_std = nn.Parameter(torch.log(init_noise_std * torch.ones(num_actions)))
+            else:
+                raise ValueError(f"Unknown standard deviation type: {self.noise_std_type}. Should be 'scalar' or 'log'")
+
+        # Action distribution (populated in update_distribution)
         self.distribution = None
         # disable args validation for speedup
-        Normal.set_default_validate_args = False
+        Normal.set_default_validate_args(False)
         
         # seems that we get better performance without init
         # self.init_memory_weights(self.memory_a, 0.001, 0.)
@@ -107,14 +120,20 @@ class ActorCritic(nn.Module):
             print("Observations contains NaN or Inf before actor network")
             observations = torch.nan_to_num(observations)
 
+        # compute mean
         mean = self.actor(observations)
-        
-        std = self.std.to(mean.device)
+        # compute standard deviation
+        if self.noise_std_type == "scalar":
+            std = self.std.expand_as(mean)
+        elif self.noise_std_type == "log":
+            std = torch.exp(self.log_std).expand_as(mean)
+        else:
+            raise ValueError(f"Unknown standard deviation type: {self.noise_std_type}. Should be 'scalar' or 'log'")
         
         # Make sure std is positive
         std = torch.clamp(std, min=1e-6)
-        
-        self.distribution = Normal(mean, mean * 0.0 + std)
+        # create distribution
+        self.distribution = Normal(mean, std)
 
     def act(self, observations, **kwargs):
         self.update_distribution(observations)
@@ -130,23 +149,3 @@ class ActorCritic(nn.Module):
     def evaluate(self, critic_observations, **kwargs):
         value = self.critic(critic_observations)
         return value
-
-
-def get_activation(act_name):
-    if act_name == "elu":
-        return nn.ELU()
-    elif act_name == "selu":
-        return nn.SELU()
-    elif act_name == "relu":
-        return nn.ReLU()
-    elif act_name == "crelu":
-        return nn.CReLU()
-    elif act_name == "lrelu":
-        return nn.LeakyReLU()
-    elif act_name == "tanh":
-        return nn.Tanh()
-    elif act_name == "sigmoid":
-        return nn.Sigmoid()
-    else:
-        print("invalid activation function!")
-        return None

@@ -2,7 +2,7 @@ from setuptools import find_packages
 from distutils.core import setup
 
 setup(name='rsl_rl',
-      version='2.0.2',
+      version='2.2.4',
       author='Nikita Rudin',
       author_email='rudinn@ethz.ch',
       license="BSD-3-Clause",

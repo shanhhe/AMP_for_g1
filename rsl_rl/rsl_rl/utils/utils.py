@@ -4,14 +4,37 @@
 from __future__ import annotations
 
 import git
+import importlib
 import os
 import pathlib
 from typing import Tuple
+from typing import Callable
 
 import torch
 import numpy as np
 
 _EPS = np.finfo(float).eps * 4.0
+
+
+def resolve_nn_activation(act_name: str) -> torch.nn.Module:
+    if act_name == "elu":
+        return torch.nn.ELU()
+    elif act_name == "selu":
+        return torch.nn.SELU()
+    elif act_name == "relu":
+        return torch.nn.ReLU()
+    elif act_name == "crelu":
+        return torch.nn.CELU()
+    elif act_name == "lrelu":
+        return torch.nn.LeakyReLU()
+    elif act_name == "tanh":
+        return torch.nn.Tanh()
+    elif act_name == "sigmoid":
+        return torch.nn.Sigmoid()
+    elif act_name == "identity":
+        return torch.nn.Identity()
+    else:
+        raise ValueError(f"Invalid activation function '{act_name}'.")
 
 
 def split_and_pad_trajectories(tensor, dones):
@@ -53,6 +76,7 @@ def split_and_pad_trajectories(tensor, dones):
     trajectory_masks = trajectory_lengths > torch.arange(0, tensor.shape[0], device=tensor.device).unsqueeze(1)
     return padded_trajectories, trajectory_masks
 
+
 def unpad_trajectories(trajectories, masks):
     """Does the inverse operation of  split_and_pad_trajectories()"""
     # Need to transpose before and after the masking to have proper reshaping
@@ -62,6 +86,37 @@ def unpad_trajectories(trajectories, masks):
         .transpose(1, 0)
     )
 
+
+def string_to_callable(name: str) -> Callable:
+    """Resolves the module and function names to return the function.
+
+    Args:
+        name (str): The function name. The format should be 'module:attribute_name'.
+
+    Raises:
+        ValueError: When the resolved attribute is not a function.
+        ValueError: When unable to resolve the attribute.
+
+    Returns:
+        Callable: The function loaded from the module.
+    """
+    try:
+        mod_name, attr_name = name.split(":")
+        mod = importlib.import_module(mod_name)
+        callable_object = getattr(mod, attr_name)
+        # check if attribute is callable
+        if callable(callable_object):
+            return callable_object
+        else:
+            raise ValueError(f"The imported object is not callable: '{name}'")
+    except AttributeError as e:
+        msg = (
+            "We could not interpret the entry as a callable object. The format of input should be"
+            f" 'module:attribute_name'\nWhile processing input '{name}', received the error:\n {e}."
+        )
+        raise ValueError(msg)
+    
+    
 def store_code_state(logdir, repositories) -> list:
     git_log_dir = os.path.join(logdir, "git")
     os.makedirs(git_log_dir, exist_ok=True)
@@ -82,7 +137,7 @@ def store_code_state(logdir, repositories) -> list:
             continue
         # write the diff file
         print(f"Storing git diff for '{repo_name}' in: {diff_file_name}")
-        with open(diff_file_name, "x") as f:
+        with open(diff_file_name, "x", encoding="utf-8") as f:
             content = f"--- git status ---\n{repo.git.status()} \n\n\n--- git diff ---\n{repo.git.diff(t)}"
             f.write(content)
         # add the file path to the list of files to be uploaded
