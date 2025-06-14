@@ -82,10 +82,6 @@ class ActorCritic(nn.Module):
         self.distribution = None
         # disable args validation for speedup
         Normal.set_default_validate_args(False)
-        
-        # seems that we get better performance without init
-        # self.init_memory_weights(self.memory_a, 0.001, 0.)
-        # self.init_memory_weights(self.memory_c, 0.001, 0.)
 
     @staticmethod
     # not used at the moment
@@ -149,3 +145,19 @@ class ActorCritic(nn.Module):
     def evaluate(self, critic_observations, **kwargs):
         value = self.critic(critic_observations)
         return value
+
+    def load_state_dict(self, state_dict, strict=True):
+        """Load the parameters of the actor-critic model.
+
+        Args:
+            state_dict (dict): State dictionary of the model.
+            strict (bool): Whether to strictly enforce that the keys in state_dict match the keys returned by this
+                           module's state_dict() function.
+
+        Returns:
+            bool: Whether this training resumes a previous training. This flag is used by the `load()` function of
+                  `OnPolicyRunner` to determine how to load further parameters (relevant for, e.g., distillation).
+        """
+
+        super().load_state_dict(state_dict, strict=strict)
+        return True

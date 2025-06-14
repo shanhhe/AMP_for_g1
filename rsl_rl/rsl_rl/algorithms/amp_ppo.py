@@ -6,7 +6,7 @@ from __future__ import annotations
 import torch
 import torch.nn as nn
 import torch.optim as optim
-import warnings
+from itertools import chain
 
 from rsl_rl.modules import ActorCritic
 from rsl_rl.modules.rnd import RandomNetworkDistillation
@@ -15,11 +15,11 @@ from rsl_rl.storage.replay_buffer import ReplayBuffer
 from rsl_rl.utils import string_to_callable
 
 class AMPPPO:
-    actor_critic: ActorCritic
+    policy: ActorCritic
     """The actor critic module."""
 
     def __init__(self,
-                 actor_critic,
+                 policy,
                  discriminator,
                  amp_data,
                  amp_normalizer,
@@ -41,25 +41,34 @@ class AMPPPO:
                  rnd_cfg: dict | None = None,
                  # Symmetry parameters
                  symmetry_cfg: dict | None = None,
+                 # Distributed training parameters
+                 multi_gpu_cfg: dict | None = None,
                  amp_replay_buffer_size=100000,
                  min_std=None,
                  ):
-
+        # device-related parameters
         self.device = device
+        self.is_multi_gpu = multi_gpu_cfg is not None
+        # Multi-GPU parameters
+        if multi_gpu_cfg is not None:
+            self.gpu_global_rank = multi_gpu_cfg["global_rank"]
+            self.gpu_world_size = multi_gpu_cfg["world_size"]
+        else:
+            self.gpu_global_rank = 0
+            self.gpu_world_size = 1
+        
 
-        self.desired_kl = desired_kl
-        self.schedule = schedule
-        self.learning_rate = learning_rate
-        self.normalize_advantage_per_mini_batch = normalize_advantage_per_mini_batch
-        self.min_std = min_std
+        
 
         # RND components
         if rnd_cfg is not None:
+            # Extract learning rate and remove it from the original dict
+            learning_rate = rnd_cfg.pop("learning_rate", 1e-3)
             # Create RND module
             self.rnd = RandomNetworkDistillation(device=self.device, **rnd_cfg)
             # Create RND optimizer
             params = self.rnd.predictor.parameters()
-            self.rnd_optimizer = optim.Adam(params, lr=rnd_cfg.get("learning_rate", 1e-3))
+            self.rnd_optimizer = optim.Adam(params, lr=learning_rate)
         else:
             self.rnd = None
             self.rnd_optimizer = None
@@ -70,7 +79,7 @@ class AMPPPO:
             use_symmetry = symmetry_cfg["use_data_augmentation"] or symmetry_cfg["use_mirror_loss"]
             # Print that we are not using symmetry
             if not use_symmetry:
-                warnings.warn("Symmetry not used for learning. We will use it for logging instead.")
+                print("Symmetry not used for learning. We will use it for logging instead.")
             # If function is a string then resolve it to a function
             if isinstance(symmetry_cfg["data_augmentation_func"], str):
                 symmetry_cfg["data_augmentation_func"] = string_to_callable(symmetry_cfg["data_augmentation_func"])
@@ -95,12 +104,12 @@ class AMPPPO:
         self.amp_normalizer = amp_normalizer
 
         # PPO components
-        self.actor_critic = actor_critic
-        self.actor_critic.to(self.device)
+        self.policy = policy
+        self.policy.to(self.device)
 
         # Create optimizer for policy and discriminator.
         params = [
-            {'params': self.actor_critic.parameters(), 'name': 'actor_critic'},
+            {'params': self.policy.parameters(), 'name': 'actor_critic'},
             {'params': self.discriminator.trunk.parameters(),
              'weight_decay': 10e-4, 'name': 'amp_trunk'},
             {'params': self.discriminator.amp_linear.parameters(),
@@ -121,8 +130,13 @@ class AMPPPO:
         self.lam = lam
         self.max_grad_norm = max_grad_norm
         self.use_clipped_value_loss = use_clipped_value_loss
+        self.desired_kl = desired_kl
+        self.schedule = schedule
+        self.learning_rate = learning_rate
+        self.normalize_advantage_per_mini_batch = normalize_advantage_per_mini_batch
+        self.min_std = min_std
 
-    def init_storage(self, num_envs, num_transitions_per_env, actor_obs_shape, critic_obs_shape, action_shape):
+    def init_storage(self, training_type, num_envs, num_transitions_per_env, actor_obs_shape, critic_obs_shape, actions_shape):
         # create memory for RND as well :)
         if self.rnd:
             rnd_state_shape = [self.rnd.num_states]
@@ -130,34 +144,29 @@ class AMPPPO:
             rnd_state_shape = None
         # create rollout storage
         self.storage = RolloutStorage(
+            training_type,
             num_envs,
             num_transitions_per_env,
             actor_obs_shape,
             critic_obs_shape,
-            action_shape,
+            actions_shape,
             rnd_state_shape,
             self.device)
 
-    def test_mode(self):
-        self.actor_critic.test()
-    
-    def train_mode(self):
-        self.actor_critic.train()
-
     def act(self, obs, critic_obs, amp_obs):
         "根据传入的观测(obs 和 critic_obs)以及 AMP 数据(amp_obs),使用策略网络计算动作及相关统计量，并保存到 transition 中。"
-        if self.actor_critic.is_recurrent:
-            self.transition.hidden_states = self.actor_critic.get_hidden_states()
+        if self.policy.is_recurrent:
+            self.transition.hidden_states = self.policy.get_hidden_states()
         # Compute the actions and values
         aug_obs, aug_critic_obs = obs.detach(), critic_obs.detach()
-        self.transition.actions = self.actor_critic.act(aug_obs).detach()
-        self.transition.values = self.actor_critic.evaluate(aug_critic_obs).detach()
-        self.transition.actions_log_prob = self.actor_critic.get_actions_log_prob(self.transition.actions).detach()
-        self.transition.action_mean = self.actor_critic.action_mean.detach()
-        self.transition.action_sigma = self.actor_critic.action_std.detach()
+        self.transition.actions = self.policy.act(aug_obs).detach()
+        self.transition.values = self.policy.evaluate(aug_critic_obs).detach()
+        self.transition.actions_log_prob = self.policy.get_actions_log_prob(self.transition.actions).detach()
+        self.transition.action_mean = self.policy.action_mean.detach()
+        self.transition.action_sigma = self.policy.action_std.detach()
         # need to record obs and critic_obs before env.step()
         self.transition.observations = obs
-        self.transition.critic_observations = critic_obs
+        self.transition.privileged_observations = critic_obs
         self.amp_transition.observations = amp_obs
         return self.transition.actions
     
@@ -190,15 +199,15 @@ class AMPPPO:
         self.amp_storage.insert(
             self.amp_transition.observations, amp_obs)
 
-        # Record the transition
+        # record the transition
         self.storage.add_transitions(self.transition)
         self.transition.clear()
         self.amp_transition.clear()
-        self.actor_critic.reset(dones)
+        self.policy.reset(dones)
     
     def compute_returns(self, last_critic_obs):
         # compute value for the last step
-        last_values = self.actor_critic.evaluate(last_critic_obs).detach()
+        last_values = self.policy.evaluate(last_critic_obs).detach()
         self.storage.compute_returns(last_values, self.gamma, self.lam, normalize_advantage=not self.normalize_advantage_per_mini_batch)
 
     def update(self): # noqa: C901
@@ -223,7 +232,7 @@ class AMPPPO:
         mean_expert_pred = 0
 
         # generator for mini batches
-        if self.actor_critic.is_recurrent:
+        if self.policy.is_recurrent:
             generator = self.storage.recurrent_mini_batch_generator(self.num_mini_batches, self.num_learning_epochs)
         else:
             generator = self.storage.mini_batch_generator(self.num_mini_batches, self.num_learning_epochs)
@@ -259,10 +268,10 @@ class AMPPPO:
                     data_augmentation_func = self.symmetry["data_augmentation_func"]
                     # returned shape: [batch_size * num_aug, ...]
                     obs_batch, actions_batch = data_augmentation_func(
-                        obs=obs_batch, actions=actions_batch, env=self.symmetry["_env"], is_critic=False
+                        obs=obs_batch, actions=actions_batch, env=self.symmetry["_env"], obs_type="policy"
                     )
                     critic_obs_batch, _ = data_augmentation_func(
-                        obs=critic_obs_batch, actions=None, env=self.symmetry["_env"], is_critic=True
+                        obs=critic_obs_batch, actions=None, env=self.symmetry["_env"], obs_type="policy"
                     )
                     # compute number of augmentations per sample
                     num_aug = int(obs_batch.shape[0] / original_batch_size)
@@ -275,21 +284,20 @@ class AMPPPO:
                     returns_batch = returns_batch.repeat(num_aug, 1)
                 
                 # Recompute actions log prob and entropy for current batch of transitions
-                # Note: we need to do this because we updated the actor_critic with the new parameters
+                # Note: we need to do this because we updated the policy with the new parameters
                 # -- actor
                 aug_obs_batch = obs_batch.detach()
-                self.actor_critic.act(aug_obs_batch, masks=masks_batch, hidden_states=hid_states_batch[0])
-                actions_log_prob_batch = self.actor_critic.get_actions_log_prob(actions_batch)
+                self.policy.act(aug_obs_batch, masks=masks_batch, hidden_states=hid_states_batch[0])
+                actions_log_prob_batch = self.policy.get_actions_log_prob(actions_batch)
                 
                 # 利用 critic 部分计算状态值，同时获取当前策略网络输出的均值、标准差和动作熵（熵项通常用于鼓励策略多样性）。这里的 mu 和 sigma 是策略网络输出的均值和标准差。
                 # -- critic
-                aug_critic_obs_batch = critic_obs_batch.detach()
-                value_batch = self.actor_critic.evaluate(aug_critic_obs_batch, masks=masks_batch, hidden_states=hid_states_batch[1])
+                value_batch = self.policy.evaluate(critic_obs_batch, masks=masks_batch, hidden_states=hid_states_batch[1])
                 # -- entropy
                 # we only keep the entropy of the first augmentation (the original one)
-                mu_batch = self.actor_critic.action_mean[:original_batch_size]
-                sigma_batch = self.actor_critic.action_std[:original_batch_size]
-                entropy_batch = self.actor_critic.entropy[:original_batch_size]
+                mu_batch = self.policy.action_mean[:original_batch_size]
+                sigma_batch = self.policy.action_std[:original_batch_size]
+                entropy_batch = self.policy.entropy[:original_batch_size]
 
                 # 如果设置了自适应调度（schedule == 'adaptive'）且给定目标 KL 散度（desired_kl），在不计算梯度的模式下（torch.inference_mode()）计算当前策略与旧策略之间的 KL 散度。
                 # 根据平均 KL 值与目标值的比例，调整学习率，并更新优化器中所有参数组的学习率。
@@ -304,13 +312,30 @@ class AMPPPO:
                     )
                         kl_mean = torch.mean(kl)
 
-                        if kl_mean > self.desired_kl * 2.0:
-                            self.learning_rate = max(1e-5, self.learning_rate / 1.5)
-                        elif kl_mean < self.desired_kl / 2.0 and kl_mean > 0.0:
-                            self.learning_rate = min(1e-2, self.learning_rate * 1.5)
+                        # Reduce the KL divergence across all GPUs
+                        if self.is_multi_gpu:
+                            torch.distributed.all_reduce(kl_mean, op=torch.distributed.ReduceOp.SUM)
+                            kl_mean /= self.gpu_world_size
 
+                        # Update the learning rate
+                        # Perform this adaptation only on the main process
+                        # TODO: Is this needed? If KL-divergence is the "same" across all GPUs,
+                        #       then the learning rate should be the same across all GPUs.
+                        if self.gpu_global_rank == 0:
+                            if kl_mean > self.desired_kl * 2.0:
+                                self.learning_rate = max(1e-5, self.learning_rate / 1.5)
+                            elif kl_mean < self.desired_kl / 2.0 and kl_mean > 0.0:
+                                self.learning_rate = min(1e-2, self.learning_rate * 1.5)
+
+                        # Update the learning rate for all GPUs
+                        if self.is_multi_gpu:
+                            lr_tensor = torch.tensor(self.learning_rate, device=self.device)
+                            torch.distributed.broadcast(lr_tensor, src=0)
+                            self.learning_rate = lr_tensor.item()
+
+                        # Update the learning rate for all parameter groups
                         for param_group in self.optimizer.param_groups:
-                            param_group['lr'] = self.learning_rate
+                            param_group["lr"] = self.learning_rate
 
 
                 # Surrogate loss
@@ -372,13 +397,13 @@ class AMPPPO:
                     if not self.symmetry["use_data_augmentation"]:
                         data_augmentation_func = self.symmetry["data_augmentation_func"]
                         obs_batch, _ = data_augmentation_func(
-                            obs=obs_batch, actions=None, env=self.symmetry["_env"], is_critic=False
+                            obs=obs_batch, actions=None, env=self.symmetry["_env"], obs_type="policy"
                         )
                         # compute number of augmentations per sample
                         num_aug = int(obs_batch.shape[0] / original_batch_size)
 
                     # actions predicted by the actor for symmetrically-augmented observations
-                    mean_actions_batch = self.actor_critic.act_inference(obs_batch.detach().clone())
+                    mean_actions_batch = self.policy.act_inference(obs_batch.detach().clone())
 
                     # compute the symmetrically augmented actions
                     # note: we are assuming the first augmentation is the original one.
@@ -386,7 +411,7 @@ class AMPPPO:
                     #   However, the symmetry loss is computed using the mean of the distribution.
                     action_mean_orig = mean_actions_batch[:original_batch_size]
                     _, actions_mean_symm_batch = data_augmentation_func(
-                        obs=None, actions=action_mean_orig, env=self.symmetry["_env"], is_critic=False
+                        obs=None, actions=action_mean_orig, env=self.symmetry["_env"], obs_type="policy"
                     )
 
                     # compute the loss (we skip the first augmentation as it is the original one)
@@ -404,29 +429,36 @@ class AMPPPO:
                 if self.rnd:
                     # predict the embedding and the target
                     predicted_embedding = self.rnd.predictor(rnd_state_batch)
-                    target_embedding = self.rnd.target(rnd_state_batch)
+                    target_embedding = self.rnd.target(rnd_state_batch).detach()
                     # compute the loss as the mean squared error
                     mseloss = torch.nn.MSELoss()
-                    rnd_loss = mseloss(predicted_embedding, target_embedding.detach())
+                    rnd_loss = mseloss(predicted_embedding, target_embedding)
                 
                 
-                # Gradient step
+                # Compute the gradients
                 # -- For PPO
                 self.optimizer.zero_grad()
                 loss.backward()
+                # -- For RND
+                if self.rnd:
+                    self.rnd_optimizer.zero_grad()  # type: ignore
+                    rnd_loss.backward()
 
+                # Collect gradients from all GPUs
+                if self.is_multi_gpu:
+                    self.reduce_parameters()
+
+                # Apply the gradients -- For PPO
                 # Increase gradient clipping to handle potential large values
-                nn.utils.clip_grad_norm_(self.actor_critic.parameters(), self.max_grad_norm)
+                nn.utils.clip_grad_norm_(self.policy.parameters(), self.max_grad_norm)
                 self.optimizer.step()
 
                 # -- For RND
                 if self.rnd_optimizer:
-                    self.rnd_optimizer.zero_grad()
-                    rnd_loss.backward()
                     self.rnd_optimizer.step()
 
-                if not self.actor_critic.fixed_std and self.min_std is not None:
-                    self.actor_critic.std.data = self.actor_critic.std.data.clamp(min=self.min_std)
+                if not self.policy.fixed_std and self.min_std is not None:
+                    self.policy.std.data = self.policy.std.data.clamp(min=self.min_std)
 
                 if self.amp_normalizer is not None:
                     self.amp_normalizer.update(policy_state.cpu().numpy())
@@ -467,4 +499,62 @@ class AMPPPO:
         # -- Clear the storage
         self.storage.clear()
 
-        return mean_value_loss, mean_surrogate_loss, mean_entropy, mean_rnd_loss, mean_symmetry_loss, mean_amp_loss, mean_grad_pen_loss, mean_policy_pred, mean_expert_pred
+        # construct the loss dictionary
+        loss_dict = {
+            "value_function": mean_value_loss,
+            "surrogate": mean_surrogate_loss,
+            "entropy": mean_entropy,
+        }
+        if self.rnd:
+            loss_dict["rnd"] = mean_rnd_loss
+        if self.symmetry:
+            loss_dict["symmetry"] = mean_symmetry_loss
+
+        return loss_dict
+    
+    """
+    Helper functions
+    """
+
+    def broadcast_parameters(self):
+        """Broadcast model parameters to all GPUs."""
+        # obtain the model parameters on current GPU
+        model_params = [self.policy.state_dict()]
+        if self.rnd:
+            model_params.append(self.rnd.predictor.state_dict())
+        # broadcast the model parameters
+        torch.distributed.broadcast_object_list(model_params, src=0)
+        # load the model parameters on all GPUs from source GPU
+        self.policy.load_state_dict(model_params[0])
+        if self.rnd:
+            self.rnd.predictor.load_state_dict(model_params[1])
+    
+    def reduce_parameters(self):
+        """Collect gradients from all GPUs and average them.
+
+        This function is called after the backward pass to synchronize the gradients across all GPUs.
+        """
+        # Create a tensor to store the gradients
+        grads = [param.grad.view(-1) for param in self.policy.parameters() if param.grad is not None]
+        if self.rnd:
+            grads += [param.grad.view(-1) for param in self.rnd.parameters() if param.grad is not None]
+        all_grads = torch.cat(grads)
+
+        # Average the gradients across all GPUs
+        torch.distributed.all_reduce(all_grads, op=torch.distributed.ReduceOp.SUM)
+        all_grads /= self.gpu_world_size
+
+        # Get all parameters
+        all_params = self.policy.parameters()
+        if self.rnd:
+            all_params = chain(all_params, self.rnd.parameters())
+
+        # Update the gradients for all parameters with the reduced gradients
+        offset = 0
+        for param in all_params:
+            if param.grad is not None:
+                numel = param.numel()
+                # copy data back from shared buffer
+                param.grad.data.copy_(all_grads[offset : offset + numel].view_as(param.grad.data))
+                # update the offset for the next parameter
+                offset += numel
