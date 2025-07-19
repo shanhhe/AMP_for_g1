@@ -92,7 +92,7 @@ class G1LeggedRobot(BaseTask):
             self.amp_loader = AMPLoader(motion_files=self.cfg.env.amp_motion_files, device=self.device,
                                         time_between_frames=self.dt, 
                                         selected_joint_indices=self.cfg.asset.selected_joint_indices)
-                                        
+        self.cartesian_data_link_indices = [self.body_names.index(link_name) for link_name in self.cfg.env.g1_cartesian_link_names if link_name in self.body_names]
 
     def reset(self):
         """ Reset all robots"""
@@ -101,7 +101,8 @@ class G1LeggedRobot(BaseTask):
             self.obs_buf_history.reset(
                 torch.arange(self.num_envs, device=self.device),
                 self.obs_buf[torch.arange(self.num_envs, device=self.device)])
-        obs, privileged_obs, _, _, _, _, _ = self.step(torch.zeros(self.num_envs, self.num_actions, device=self.device, requires_grad=False))
+        obs, _, _, extras, _, _ = self.step(torch.zeros(self.num_envs, self.num_actions, device=self.device, requires_grad=False))
+        privileged_obs = extras["observations"]["critic"]
         return obs, privileged_obs
 
     def step(self, actions):
@@ -170,7 +171,8 @@ class G1LeggedRobot(BaseTask):
         critic_obs = self.privileged_obs_buf
         extras = {
             "observations": {
-                "critic": critic_obs   #  # Critic-level observation
+                "critic": critic_obs,   #  # Critic-level observation
+                "rnd_state": self.privileged_obs_buf  # RND state
             }
         }
         return policy_obs, extras
@@ -182,11 +184,7 @@ class G1LeggedRobot(BaseTask):
         """
         self.gym.refresh_actor_root_state_tensor(self.sim)
         self.gym.refresh_net_contact_force_tensor(self.sim)
-
-        # Check root states for NaNs
-        if torch.isnan(self.root_states).any():
-            print("NaN in root_states after physics step!")
-            self.root_states = torch.nan_to_num(self.root_states)
+        self.gym.refresh_rigid_body_state_tensor(self.sim)
 
         self.episode_length_buf += 1
         self.common_step_counter += 1
@@ -290,8 +288,8 @@ class G1LeggedRobot(BaseTask):
         if self.cfg.env.send_timeouts:
             self.extras["time_outs"] = self.time_out_buf
 
-        self.extras["episode"]["lin_vel_error"] = torch.mean(self.lin_vel_error_buf[env_ids])
-        self.extras["episode"]["ang_vel_error"] = torch.mean(self.ang_vel_error_buf[env_ids])
+        # self.extras["episode"]["lin_vel_error"] = torch.mean(self.lin_vel_error_buf[env_ids])
+        # self.extras["episode"]["ang_vel_error"] = torch.mean(self.ang_vel_error_buf[env_ids])
 
     def compute_reward(self):
         """ Compute rewards
@@ -372,17 +370,85 @@ class G1LeggedRobot(BaseTask):
         
 
     def get_amp_observations(self):
-        """ Get AMP observations
-        """
-        # 21 + 3 + 3 + 21 + 1 = 49
-        joint_pos = self.dof_pos # 21
-        # foot_pos = self.foot_positions_in_pelvis_frame(self.dof_pos).to(self.device) # 6
-        base_lin_vel = self.base_lin_vel # 3
-        base_ang_vel = self.base_ang_vel # 3
-        joint_vel = self.dof_vel # 21
-        z_pos = self.root_states[:, 2:3] # 1
-        # return torch.cat((joint_pos, foot_pos, base_lin_vel, base_ang_vel, joint_vel, z_pos), dim=-1)
-        return torch.cat((joint_pos, base_lin_vel, base_ang_vel, joint_vel, z_pos), dim=-1)       
+    #     """ Get AMP observations
+    #     """
+        if self.cfg.env.data_type == 'joint':
+            # # 21 + 3 + 3 + 21 + 1 = 49
+            joint_pos = self.dof_pos # 21
+            # foot_pos = self.foot_positions_in_pelvis_frame(self.dof_pos).to(self.device) # 6
+            base_lin_vel = self.base_lin_vel # 3
+            base_ang_vel = self.base_ang_vel # 3
+            joint_vel = self.dof_vel # 21
+            z_pos = self.root_states[:, 2:3] # 1
+            # return torch.cat((joint_pos, foot_pos, base_lin_vel, base_ang_vel, joint_vel, z_pos), dim=-1)
+            return torch.cat((joint_pos, base_lin_vel, base_ang_vel, joint_vel, z_pos), dim=-1)
+        elif self.cfg.env.data_type == 'cartesian' or self.cfg.env.data_type == 'joints_and_cartesian':
+            N = self.num_envs
+            K = len(self.cartesian_data_link_indices)
+
+            # 基座四元数
+            base_q = self.base_quat                  # (N,4)
+
+            # 把 base_q expand 到 (N,K,4) 再展平
+            base_q_exp = base_q.unsqueeze(1).expand(N, K, 4).reshape(N*K, 4)  # (N*K,4)
+            base_q_inv = quat_conjugate(base_q_exp.reshape(N, K, 4))  # (N*K,4)
+
+            # --- 1) link pos & vel world → local ---
+            world_key_body_pose = self.rigid_body_states[:, self.cartesian_data_link_indices, 0:3]   # (N,K,3)
+            world_key_body_vel = self.rigid_body_states[:, self.cartesian_data_link_indices, 7:10]  # (N,K,3)
+            world_key_body_quat = self.rigid_body_states[:, self.cartesian_data_link_indices, 3:7]  # (N,K,4)
+
+            local_key_body_pos = world_key_body_pose - self.root_states[:, 0:3].unsqueeze(1)  # (N,K,3)
+            local_key_body_vel = world_key_body_vel - self.root_states[:, 7:10].unsqueeze(1)  # (N,K,3)
+            local_link_quat = quat_mul(base_q_inv, world_key_body_quat) # (N,K,4) 
+
+            # 展平
+            flat_end_pos = local_key_body_pos.view(N*K, 3)            # (N*K,3)
+            flat_end_vel = local_key_body_vel.view(N*K, 3)            # (N*K,3)
+            
+
+            # 逆旋转到本地
+            local_end_pos = quat_rotate_inverse(base_q_exp, flat_end_pos)  # (N*K,3)
+            local_end_vel = quat_rotate_inverse(base_q_exp, flat_end_vel)  # (N*K,3)
+
+            # 再恢复 (N, K*3)
+            flat_local_key_pos = local_end_pos.view(N, K*3)
+            flat_local_key_vel = local_end_vel.view(N, K*3)
+            flat_local_link_quat = local_link_quat.reshape(N, K * 4)  # (N,K*4)
+
+            # --- 2) 基座速度 world → local ---
+            # alrewady in local frame
+            base_lin_vel = self.base_lin_vel   # (N,3)
+            base_ang_vel = self.base_ang_vel   # (N,3)
+
+            # --- 4) 高度(本来就是局部） ---
+            z_pos     = self.root_states[:, 2:3]    # (N,1)
+
+            joint_pos = self.dof_pos # 21
+            joint_vel = self.dof_vel # 21
+
+            if self.cfg.env.data_type == 'cartesian':
+                # concat
+                return torch.cat([
+                    flat_local_key_pos,                # (N, K*3)
+                    base_lin_vel,      # (N,3)
+                    base_ang_vel,      # (N,3)
+                    # flat_local_key_vel,           # (N, K*3)
+                    flat_local_link_quat,          # (N, K*4)
+                    z_pos                    # (N,1)
+                ], dim=-1)
+            else:
+                return torch.cat([
+                    joint_pos,        # (N, 21)
+                    base_lin_vel,      # (N,3)
+                    base_ang_vel,      # (N,3)
+                    joint_vel,         # (N, 21)
+                    flat_local_key_pos,                # (N, K*3)
+                    # flat_local_key_vel,           # (N, K*3)
+                    flat_local_link_quat,          # (N, K*4)
+                    z_pos                    # (N,1)
+                ], dim=-1)
+
 
     def create_sim(self):
         """ Creates simulation, terrain and evironments
@@ -726,13 +792,17 @@ class G1LeggedRobot(BaseTask):
         actor_root_state = self.gym.acquire_actor_root_state_tensor(self.sim)
         dof_state_tensor = self.gym.acquire_dof_state_tensor(self.sim)
         net_contact_forces = self.gym.acquire_net_contact_force_tensor(self.sim)
+        rigid_body_state = self.gym.acquire_rigid_body_state_tensor(self.sim)
         self.gym.refresh_dof_state_tensor(self.sim)
         self.gym.refresh_actor_root_state_tensor(self.sim)
         self.gym.refresh_net_contact_force_tensor(self.sim)
+        self.gym.refresh_rigid_body_state_tensor(self.sim)
 
         # create some wrapper tensors for different slices
         self.root_states = gymtorch.wrap_tensor(actor_root_state) # shape: num_envs, 13 (x, y, z, quat, lin_vel, ang_vel)
         self.dof_state = gymtorch.wrap_tensor(dof_state_tensor) # shape: num_envs, num_dof, 2 (pos, vel)
+        self.rigid_body_states = gymtorch.wrap_tensor(rigid_body_state)
+        self.rigid_body_states = self.rigid_body_states.view(self.num_envs, -1, 13) # reshape to num_envs, num_bodies, 13 
         self.dof_pos = self.dof_state.view(self.num_envs, self.num_dof, 2)[..., 0]
         self.dof_vel = self.dof_state.view(self.num_envs, self.num_dof, 2)[..., 1]
         self.base_quat = self.root_states[:, 3:7]

@@ -58,8 +58,6 @@ class AMPPPO:
             self.gpu_world_size = 1
         
 
-        
-
         # RND components
         if rnd_cfg is not None:
             # Extract learning rate and remove it from the original dict
@@ -250,7 +248,6 @@ class AMPPPO:
 
                 obs_batch, critic_obs_batch, actions_batch, target_values_batch, advantages_batch, returns_batch, old_actions_log_prob_batch, \
                     old_mu_batch, old_sigma_batch, hid_states_batch, masks_batch, rnd_state_batch, = sample
-                
                 # number of augmentations per sample
                 # we start with 1 and increase it if we use symmetry augmentation
                 num_aug = 1
@@ -271,7 +268,7 @@ class AMPPPO:
                         obs=obs_batch, actions=actions_batch, env=self.symmetry["_env"], obs_type="policy"
                     )
                     critic_obs_batch, _ = data_augmentation_func(
-                        obs=critic_obs_batch, actions=None, env=self.symmetry["_env"], obs_type="policy"
+                        obs=critic_obs_batch, actions=None, env=self.symmetry["_env"], obs_type="critic"
                     )
                     # compute number of augmentations per sample
                     num_aug = int(obs_batch.shape[0] / original_batch_size)
@@ -504,6 +501,10 @@ class AMPPPO:
             "value_function": mean_value_loss,
             "surrogate": mean_surrogate_loss,
             "entropy": mean_entropy,
+            "amp_loss": mean_amp_loss,
+            "grad_penalty": mean_grad_pen_loss,
+            "policy_pred": mean_policy_pred,
+            "expert_pred": mean_expert_pred,
         }
         if self.rnd:
             loss_dict["rnd"] = mean_rnd_loss

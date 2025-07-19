@@ -161,10 +161,158 @@ class G121AMPRobot(G1LeggedRobot):
         pitch_roll_vel = torch.sum(self.base_ang_vel[:, :2]**2, dim=1)        # (B,)
         
         k_angle = 300.0   # 角度误差强度
-        k_vel   = 1.0    # 角速度误差强度
+        k_vel   = 100.0    # 角速度误差强度
         
         r_angle = torch.exp(-k_angle * pitch_roll_err)
         r_vel   = torch.exp(-k_vel   * pitch_roll_vel)
         
         # 取两项几何平均，避免任何一项为 0
         return torch.sqrt(r_angle * r_vel)
+
+def flip_g1_actor_obs(obs):
+    if obs is None:
+        return obs
+
+    flipped_obs = torch.zeros_like(obs)
+    # base_ang_vel
+    flipped_obs[..., :3] = obs[..., :3]
+    flipped_obs[..., 0] *= -1  # Flip the x component of base_ang_vel
+    flipped_obs[..., 2] *= -1  # Flip the z component of base_ang_vel
+    # projected_gravity
+    flipped_obs[..., 3:6] = obs[..., 3:6]
+    flipped_obs[..., 4] *= -1  # Flip the y component of projected_gravity
+
+    # command
+    flipped_obs[..., 6:9] = obs[..., 6:9]
+    flipped_obs[..., 7] *= -1  # Flip the vy component of command
+    flipped_obs[..., 8] *= -1  # Flip the wz component of command
+
+    # dof_pos
+    # legs
+    flipped_obs[..., 9:15] = obs[..., 15:21]
+    flipped_obs[..., 15:21] = obs[..., 9:15]
+    # waist
+    flipped_obs[..., 21:24] = obs[..., 21:24]
+    # arm
+    flipped_obs[..., 24:27] = obs[..., 27:30]
+    flipped_obs[..., 27:30] = obs[..., 24:27]
+
+    # dof_vel
+    # legs
+    flipped_obs[..., 30:36] = obs[..., 36:42]
+    flipped_obs[..., 36:42] = obs[..., 30:36]
+    # waist
+    flipped_obs[..., 42:45] = obs[..., 42:45]
+    # arm
+    flipped_obs[..., 45:48] = obs[..., 48:51]
+    flipped_obs[..., 48:51] = obs[..., 45:48]
+
+    # actions
+    # legs
+    flipped_obs[..., 51:57] = obs[..., 57:63]
+    flipped_obs[..., 57:63] = obs[..., 51:57]
+    # waist
+    flipped_obs[..., 63:66] = obs[..., 63:66]
+    # arm
+    flipped_obs[..., 66:69] = obs[..., 69:72]
+    flipped_obs[..., 69:72] = obs[..., 66:69]
+
+    vel_offset = act_offset = 21
+    base_offset = 9
+    # Flip the sign of specific bases in the observation
+    # hip_roll, hip_yaw, ankle_roll, waist_yaw, waist_roll, shoulder_roll
+    for base in [1, 2, 5, 7, 8, 11, 12, 13, 16, 19]:
+        flipped_obs[..., base + base_offset] *= -1
+        flipped_obs[..., base + base_offset + vel_offset] *= -1
+        flipped_obs[..., base + base_offset + vel_offset + act_offset] *= -1
+    return torch.cat([obs, flipped_obs], dim=0)
+
+
+def flip_g1_critic_obs(obs):
+    if obs is None:
+        return obs
+
+    flipped_obs = torch.zeros_like(obs)
+    # base_lin_vel
+    flipped_obs[..., :3] = obs[..., :3]
+    flipped_obs[..., 1] *= -1  # Flip the y component of base_lin_vel
+    # base_ang_vel
+    flipped_obs[..., 3:6] = obs[..., 3:6]
+    flipped_obs[..., 3] *= -1  # Flip the x component of base_ang_vel
+    flipped_obs[..., 5] *= -1  # Flip the z component of base_ang_vel
+    # projected_gravity
+    flipped_obs[..., 6:9] = obs[..., 6:9]
+    flipped_obs[..., 7] *= -1  # Flip the y component of projected_gravity
+    # command
+    flipped_obs[..., 9:12] = obs[..., 9:12]
+    flipped_obs[..., 10] *= -1  # Flip the vy component of command
+    flipped_obs[..., 11] *= -1  # Flip the wz component of command
+
+    # dof_pos
+    # legs
+    flipped_obs[..., 12:18] = obs[..., 18:24]
+    flipped_obs[..., 18:24] = obs[..., 12:18]
+    # waist
+    flipped_obs[..., 24:27] = obs[..., 24:27]
+    # arm
+    flipped_obs[..., 27:30] = obs[..., 30:33]
+    flipped_obs[..., 30:33] = obs[..., 27:30]
+
+    # dof_vel
+    # legs
+    flipped_obs[..., 33:39] = obs[..., 39:45]
+    flipped_obs[..., 39:45] = obs[..., 33:39]
+    # waist
+    flipped_obs[..., 45:48] = obs[..., 45:48]
+    # arm
+    flipped_obs[..., 48:51] = obs[..., 51:54]
+    flipped_obs[..., 51:54] = obs[..., 48:51]
+
+    # actions
+    # legs
+    flipped_obs[..., 54:60] = obs[..., 60:66]
+    flipped_obs[..., 60:66] = obs[..., 54:60]
+    # waist
+    flipped_obs[..., 66:69] = obs[..., 66:69]
+    # arm
+    flipped_obs[..., 69:72] = obs[..., 72:75]
+    flipped_obs[..., 72:75] = obs[..., 69:72]
+
+    vel_offset = act_offset = 21
+    # Flip the sign of specific bases in the observation
+    # hip_roll, hip_yaw, ankle_roll, waist_yaw, waist_roll, shoulder_roll
+    base_offset = 12
+    for base in [1, 2, 5, 7, 8, 11, 12, 13, 16, 19]:
+        flipped_obs[..., base + base_offset] *= -1
+        flipped_obs[..., base + vel_offset + base_offset] *= -1
+        flipped_obs[..., base_offset + vel_offset + act_offset] *= -1
+    return torch.cat([obs, flipped_obs], dim=0)
+
+
+def flip_g1_actions(actions):
+    if actions is None:
+        return None
+
+    flip_actions = torch.zeros_like(actions)
+    # legs
+    flip_actions[..., :6] = actions[..., 6:12]
+    flip_actions[..., 6:12] = actions[..., :6]
+    # waist
+    flip_actions[..., 12:15] = actions[..., 12:15]
+    # arm
+    flip_actions[..., 15:18] = actions[..., 18:21]
+    flip_actions[..., 18:21] = actions[..., 15:18]
+
+    # hip_roll, hip_yaw, ankle_roll, waist_yaw, waist_roll, shoulder_roll
+    for base in [1, 2, 5, 7, 8, 11, 12, 13, 16, 19]:
+        flip_actions[..., base] *= -1
+    return torch.cat([actions, flip_actions], dim=0)
+    
+def data_augmentation_func_g1(obs, actions, env, obs_type):
+        if obs_type == "policy":
+            obs_batch = flip_g1_actor_obs(obs)
+        else:
+            obs_batch = flip_g1_critic_obs(obs)
+
+        mean_actions_batch = flip_g1_actions(actions)
+        return (obs_batch, mean_actions_batch)

@@ -86,7 +86,7 @@ class G1AMPOnPolicyRunner:
         # evaluate the policy class
         policy_class = eval(self.runner_cfg.pop("policy_class_name"))
         policy: ActorCritic | ActorCriticRecurrent | StudentTeacher = policy_class(
-            num_obs, num_privileged_obs, self.env.num_actions, **self.runner_cfg
+            num_obs, num_privileged_obs, self.env.num_actions, **self.policy_cfg
         ).to(self.device)
 
         # resolve dimension of rnd gated state
@@ -108,11 +108,24 @@ class G1AMPOnPolicyRunner:
             self.alg_cfg["symmetry_cfg"]["_env"] = env
 
         # init AMP discriminator and data loader
-        amp_data = AMPLoader(
-            device, time_between_frames=self.env.dt, preload_transitions=True,
-            num_preload_transitions=train_cfg["runner"]["amp_num_preload_transitions"],
-            motion_files=self.runner_cfg["amp_motion_files"], selected_joint_indices=self.model_cfg["asset"]["selected_joint_indices"])
-        amp_normalizer = Normalizer(amp_data.observation_dim) # 71
+        if self.model_cfg["env"]["data_type"] == "joint":
+            amp_data = AMPLoader(
+                device, time_between_frames=self.env.dt, preload_transitions=True,
+                num_preload_transitions=train_cfg["runner"]["amp_num_preload_transitions"],
+                motion_files=self.runner_cfg["amp_motion_files"], selected_joint_indices=self.model_cfg["asset"]["selected_joint_indices"])
+        elif self.model_cfg["env"]["data_type"] == "cartesian":
+            amp_data = AMPLoader(
+                device, time_between_frames=self.env.dt, preload_transitions=True,
+                num_preload_transitions=train_cfg["runner"]["amp_num_preload_transitions"],
+                motion_files=self.runner_cfg["amp_cartesian_motion_files"], selected_joint_indices=self.model_cfg["asset"]["selected_joint_indices"],
+                datatype="Cartesian")
+        else:
+            amp_data = AMPLoader(
+                device, time_between_frames=self.env.dt, preload_transitions=True,
+                num_preload_transitions=train_cfg["runner"]["amp_num_preload_transitions"],
+                motion_files=self.runner_cfg["amp_cartesian_and_joint_motion_files"], selected_joint_indices=self.model_cfg["asset"]["selected_joint_indices"],
+                datatype="Cartesian")
+        amp_normalizer = Normalizer(amp_data.observation_dim)
         discriminator = AMPDiscriminator(
             amp_data.observation_dim * 2,
             train_cfg["runner"]["amp_reward_coef"],
@@ -406,7 +419,7 @@ class G1AMPOnPolicyRunner:
                     "Train/mean_episode_length/time", statistics.mean(locs["lenbuffer"]), self.tot_time
                 )
 
-        if locs["it"] % 1 == 0:
+        if locs["it"] % 10 == 0:
             str = f" \033[1m Learning iteration {locs['it']}/{locs['tot_iter']} \033[0m "
 
             if len(locs['rewbuffer']) > 0:
@@ -544,7 +557,7 @@ class G1AMPOnPolicyRunner:
     def eval_mode(self):
         # -- AMPPPO
         self.alg.policy.eval()
-        self.alg.discriminator.eval()
+        # self.alg.discriminator.eval()
         # -- RND
         if self.alg.rnd:
             self.alg.rnd.eval()

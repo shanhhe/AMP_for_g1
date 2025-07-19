@@ -115,7 +115,7 @@ def play(args):
     # prepare environment
     env, _ = task_registry.make_env(name=args.task, args=args, env_cfg=env_cfg)
     _, _ = env.reset()
-    obs = env.get_observations()
+    obs, _ = env.get_observations()
     # load policy
     train_cfg.runner.resume = True
     ppo_runner, train_cfg = task_registry.make_alg_runner(env=env, name=args.task, args=args, train_cfg=train_cfg)
@@ -133,7 +133,7 @@ def play(args):
     stop_state_log = env.max_episode_length - 1 # number of steps before plotting states
     # stop_state_log = 10 # number of steps before plotting states
     stop_rew_log = env.max_episode_length + 1 # number of steps before print average episode rewards
-    camera_offset = np.array([0.0, 1.5, 1.0])  # Adjust this offset as needed
+    camera_offset = np.array([2.0, 0.0, 1.0])  # Adjust this offset as needed
     robot_position = env.root_states[robot_index, :3].cpu().numpy()
     camera_position = robot_position + camera_offset
     camera_vel = np.array([1., 1., 0.])
@@ -149,7 +149,7 @@ def play(args):
             env_cfg.commands.linear_decreasing_commands_for_play = True
 
         actions = policy(obs.detach())
-        obs, _, rews, dones, infos, _, _ = env.step(actions.detach())
+        obs, rews, dones, infos, _, _ = env.step(actions.detach())
         if RECORD_FRAMES and i < num_frames:
             frames_path = os.path.join(LEGGED_GYM_ROOT_DIR, 'logs', train_cfg.runner.experiment_name, 'exported', 'frames')
             video_path = os.path.join(LEGGED_GYM_ROOT_DIR, 'logs', train_cfg.runner.experiment_name, 'exported', 'records')
@@ -231,8 +231,8 @@ def play(args):
             )
         elif i==stop_state_log:
                 # logger.plot_waist_states(run_name=args.load_run)
-                # logger.plot_states(run_name=args.load_run)
-                logger.plot_single_state(key=['left_elbow_joint', 'right_elbow_joint'], run_name=args.load_run)
+                logger.plot_states(run_name=args.load_run)
+                # logger.plot_single_state(key=['base_vel_yaw'], run_name=args.load_run)
                 # logger.plot_contact_phase(run_name=args.load_run)
                 print("Plotted states.")
         if  0 < i < stop_rew_log:

@@ -31,7 +31,9 @@ import glob
 
 from legged_gym.envs.base.g1_legged_robot_config import G1LeggedRobotCfg, G1LeggedRobotCfgPPO
 
-MOTION_FILES = glob.glob('datasets/customed_g1/walk1.csv')  # Replace with your actual path to the motion files
+MOTION_FILES = glob.glob('datasets/joint_from_simulation/forward_1.0.csv')  # Replace with your actual path to the motion files
+CARTESIAN_MOTION_FILES = glob.glob('datasets/cartesian_with_orientation_from_simulation/forward_1.0.csv')  # Replace with your actual path to the motion files
+CARTESIAN_AND_JOINT_MOTION_FILES = glob.glob('datasets/joints_and_cartesian_from_simulation/forward_1.0.csv')
 
 
 class G121AMPCfg( G1LeggedRobotCfg ):
@@ -46,9 +48,15 @@ class G121AMPCfg( G1LeggedRobotCfg ):
         num_observations = 72 #original amp
         num_privileged_obs = 75
         reference_state_initialization = True
-        reference_state_initialization_prob = 0.95
+        reference_state_initialization_prob = 1
         amp_motion_files = MOTION_FILES
         episode_length_s = 20 # episode length in seconds
+        g1_cartesian_link_names = ["left_hip_yaw_link", "left_knee_link", "left_ankle_roll_link",  
+                              "right_hip_yaw_link", "right_knee_link", "right_ankle_roll_link",
+                                "torso_link", "head_link",
+                              "left_shoulder_roll_link", "left_elbow_link", "left_rubber_hand",
+                              "right_shoulder_roll_link", "right_elbow_link", "right_rubber_hand"]
+        data_type = 'cartesian'  # 'cartesian' or 'joint' or 'joints_and_cartesian'
 
     class init_state( G1LeggedRobotCfg.init_state ):
         pos = [0.0, 0.0, 0.8] # x,y,z [m]
@@ -129,7 +137,7 @@ class G121AMPCfg( G1LeggedRobotCfg ):
         penalize_contacts_on = ["head", "hip", "wrist", "torso", "shoulder", "elbow", "knee"]
         knee_name = "knee"
         # terminate_after_contacts_on = ["pelvis", "head", "hip", "wrist", "torso", "shoulder", "elbow", "knee"]
-        terminate_after_contacts_on = ["pelvis"]
+        terminate_after_contacts_on = ["pelvis", "head"]
         self_collisions = 0 # 1 to disable, 0 to enable...bitwise filter
         flip_visual_attachments = False
         terminate_after_base_z = 0.4
@@ -204,7 +212,7 @@ class G121AMPCfg( G1LeggedRobotCfg ):
             # swing_height = 0.5
 
             tracking_lin_vel = 8.0
-            tracking_ang_vel = 6.0
+            tracking_ang_vel = 5.0
             lin_vel_z = -2.0
             ang_vel_xy = -0.05
             orientation = 1.0
@@ -230,9 +238,9 @@ class G121AMPCfg( G1LeggedRobotCfg ):
         linear_increasing_commands_for_play = False # if true: increase the linear velocity commands during play
         linear_decreasing_commands_for_play = False
         class ranges:
-            lin_vel_x = [0.0, 1.5] # min max [m/s]
-            lin_vel_y = [-1.0, 1.0]   # min max [m/s]
-            ang_vel_yaw = [-1.0, 1.0]    # min max [rad/s]
+            lin_vel_x = [-0.3, 1.2] # min max [m/s]
+            lin_vel_y = [-0.3, 0.3]   # min max [m/s]
+            ang_vel_yaw = [-0.3, 0.3]    # min max [rad/s]
             heading = [-3.14, 3.14]
 
     # class sim( G1LeggedRobotCfg.sim ):
@@ -241,21 +249,66 @@ class G121AMPCfg( G1LeggedRobotCfg ):
 class G121AMPCfgPPO( G1LeggedRobotCfgPPO ):
     runner_class_name = 'G1AMPOnPolicyRunner'
     class algorithm( G1LeggedRobotCfgPPO.algorithm ):
-        entropy_coef = 0.01
+        entropy_coef = 0.005 # 0.005 for cartesian, 0.015 for joint space
+        # entropy_coef = 0.012 # 0.005 for cartesian, 0.015 for joint space
         amp_replay_buffer_size = 1000000
         num_learning_epochs = 5
         num_mini_batches = 4
 
+        # # -- Random Network Distillation
+        # class rnd_cfg: 
+        #     weight = 0.0 # initial weight of the RND reward
+
+        #     # note: This is a dictionary with a required key called "mode".
+        #     #   Please check the RND module for more information.
+        #     weight_schedule = None
+
+        #     reward_normalization: False  # whether to normalize RND reward # not improve training
+        #     state_normalization: True  # whether to normalize RND state observations # curiosity normalization(Recommended to be True)
+
+        #     # -- Learning parameters
+        #     learning_rate = 0.001  # learning rate for RND
+
+        #     # -- Network parameters
+        #     # note: if -1, then the network will use dimensions of the observation
+        #     num_outputs = 1  # number of outputs of RND network
+        #     predictor_hidden_dims = [-1] # hidden dimensions of predictor network
+        #     target_hidden_dims = [-1]  # hidden dimensions of target network
+        
+        # class symmetry_cfg:
+
+        #     use_data_augmentation = True  # this adds symmetric trajectories to the batch
+        #     use_mirror_loss = False  # this adds symmetry loss term to the loss function
+
+        #     # string containing the module and function name to import.
+        #     # Example: "legged_gym.envs.locomotion.anymal_c.symmetry:get_symmetric_states"
+        #     #
+        #     # .. code-block:: python
+        #     #
+        #     #     @torch.no_grad()
+        #     #     def get_symmetric_states(
+        #     #        obs: Optional[torch.Tensor] = None, actions: Optional[torch.Tensor] = None, cfg: "BaseEnvCfg" = None, obs_type: str = "policy"
+        #     #     ) -> Tuple[torch.Tensor, torch.Tensor]:
+        #     #
+        #     data_augmentation_func = "legged_gym.envs.g1_21.g1_21_amp_env:data_augmentation_func_g1"
+
+        #     # coefficient for symmetry loss term
+        #     # if 0, then no symmetry loss is used
+        #     mirror_loss_coeff = 0.0
+
     class runner( G1LeggedRobotCfgPPO.runner ):
-        run_name = 'walk_single_forward'
-        experiment_name = 'single_motion'
+        run_name = 'walkvel1_cartesian_space_entropy_coef0.05_resume'
+        experiment_name = 'cartesian_from_simulation'
         algorithm_class_name = 'AMPPPO'
         policy_class_name = 'ActorCritic'
-        max_iterations = 50000 # number of policy updates
+        max_iterations = 10000 # number of policy updates
         empirical_normalization = False
 
         amp_reward_coef = 0.3
         amp_motion_files = MOTION_FILES
+        amp_cartesian_motion_files = CARTESIAN_MOTION_FILES
+        amp_cartesian_and_joint_motion_files = CARTESIAN_AND_JOINT_MOTION_FILES
+        
         amp_num_preload_transitions = 2000000
         amp_task_reward_lerp = 0.3 # smaller to rely more on style reward(imitation)
         amp_discr_hidden_dims = [1024, 512]

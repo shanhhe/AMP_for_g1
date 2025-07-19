@@ -137,17 +137,26 @@ class Logger:
 
 
     def _plot_single_state(self, keys, run_name=None):
-        nb_rows = len(keys)
+        expand_keys = []
+        for key in keys:
+            for _, state_name in enumerate(self.state_log):
+                if key == state_name:
+                    expand_keys.append(state_name)
+                    break
+            if len(expand_keys) == 0:
+                for _, state_name in enumerate(self.state_log):
+                    if key in state_name:
+                        expand_keys.append(state_name)              
+        nb_rows = len(expand_keys)
         nb_cols = 1
         fig, axs = plt.subplots(nb_rows, nb_cols, figsize=(20, 8), sharex=True)
+        if nb_rows == 1:
+            axs = [axs]
         for _, value in self.state_log.items():
             time = np.linspace(0, len(value)*self.dt, len(value))
             break
         log = self.state_log
-        for i, key in enumerate(keys):
-            if key not in log:
-                print(f"Key '{key}' not found in state log.")
-                return
+        for i, key in enumerate(expand_keys):
             axs[i].plot(time, log[key], label=key)
             axs[i].set(xlabel='time [s]', ylabel='Value', title=f'{key} over time')
             axs[i].grid(True)
@@ -158,10 +167,10 @@ class Logger:
         plt.tight_layout()
         # Save the figure
         log_dir = '/home/shanhe/AMP_for_hardware/legged_gym/data/'
-        log_dir = os.path.join(log_dir, 'before_symmetry')
+        log_dir = os.path.join(log_dir, 'test')
         if not os.path.exists(log_dir):
             os.makedirs(log_dir)
-        fig.savefig(os.path.join(log_dir, f'{key}_{run_name}.png'), dpi=300, bbox_inches='tight')
+        fig.savefig(os.path.join(log_dir, f'{keys[0]}_{run_name}.png'), dpi=300, bbox_inches='tight')
 
 
     def _plot_waist(self, run_name=None):

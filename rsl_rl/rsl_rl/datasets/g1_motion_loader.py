@@ -18,9 +18,13 @@ class AMPLoader:
         """Set data index for the motion data."""
         # Constants for indexing into the motion data - specific to 36-value format
         # 3 + 4 + num_dofs + 3 + 3 + num_dofs = 55
-        self.JOINT_POS_SIZE = len(self.selected_joint_indices) if self.selected_joint_indices else 29
+        if self.datatype == "Joint":
+            self.JOINT_POS_SIZE = 21
+        else:
+            self.JOINT_POS_SIZE = 14 * 4 # 10 joints, each with 3 values (x, y, z)
+
         self.JOINT_VEL_SIZE = self.JOINT_POS_SIZE
-    
+
         # Sizes of each component
         self.POS_SIZE = 3
         self.ROT_SIZE = 4
@@ -48,7 +52,6 @@ class AMPLoader:
         self.JOINT_VEL_END_IDX = self.JOINT_VEL_START_IDX + self.JOINT_VEL_SIZE # 13 + 2 * num_dofs
 
     
-    
     def __init__(
             self,
             device,
@@ -57,7 +60,8 @@ class AMPLoader:
             preload_transitions=False,
             num_preload_transitions=1000000,
             motion_files=glob.glob('datasets/motion_files2/*'),
-            selected_joint_indices=None  # 新增参数：你想要保留的关节索引列表
+            selected_joint_indices=None,  # 新增参数：你想要保留的关节索引列表
+            datatype='Joint',
             ):
         """Expert dataset provides AMP observations from motion dataset.
 
@@ -67,185 +71,37 @@ class AMPLoader:
         self.time_between_frames = time_between_frames
         self.selected_joint_indices = selected_joint_indices
         self.num_dofs = len(selected_joint_indices)
+        self.datatype = datatype
         self.set_data_index()
         
         # Values to store for each trajectory
         self.trajectories = []
-        self.extended_traj = []
-        self.trajectories_full = []
         self.trajectory_names = []
         self.trajectory_idxs = []
         self.trajectory_lens = []  # Traj length in seconds
         self.trajectory_weights = []
         self.trajectory_frame_durations = []
         self.trajectory_num_frames = []
-
         for i, motion_file in enumerate(motion_files):
             self.trajectory_names.append(motion_file.split('.')[0])
             
-            try:
-                # Handle different file formats - assume text file with space/comma-separated values
-                with open(motion_file, "r") as f:
-                    # Try to detect if this is JSON first
-                    try:
-                        motion_json = json.load(f)
-                        motion_data = np.array(motion_json["Frames"])
-                        frame_duration = float(motion_json.get("FrameDuration", 1.0/30.0))  # Default to 30fps
-                        motion_weight = float(motion_json.get("MotionWeight", 1.0))
-                    except json.JSONDecodeError:
-                        # If not JSON, check file extension
-                        if motion_file.endswith('.csv'):
-                            # Reset file pointer and read as CSV
-                            f.seek(0)
-                            motion_data = []
-                            for line in f:
-                                # Split by comma and convert to float
-                                values = [float(x) for x in line.strip().split(',')]
-                                if len(values) == 36:  # Ensure line has expected number of values
-                                    motion_data.append(values[:7])
-                                    for j in self.selected_joint_indices:
-                                        # Append the joint positions for the selected indices
-                                        if j == 13:
-                                            # Special case for 13th joint, which is the waist roll joint
-                                            motion_data[-1].append(values[j+7] * 0.1)
-                                        else:
-                                            # For other joints, append normally
-                                            motion_data[-1].append(values[j+7])
-                        else:
-                            # Assume it's a text file with space-separated values
-                            f.seek(0)
-                            lines = f.readlines()
-                            motion_data = []
-                            for line in lines:
-                                # Clean the line and split by whitespace
-                                values = [float(x) for x in line.strip().split()]
-                                if len(values) == 36:  # Ensure line has expected number of values
-                                    motion_data.append(values[:7])
-                                    for j in self.selected_joint_indices:
-                                        # Append the joint positions for the selected indices
-                                        motion_data[-1].append(values[j+7])
-                        motion_data = np.array(motion_data)
-                        frame_duration = 1.0/30.0  # Assume 30fps for text files
-                        motion_weight = 1.0
-            
-                # Normalize and standardize quaternions
-                for f_i in range(motion_data.shape[0]):
-                    root_rot = self.get_root_rot(motion_data[f_i])
-                    root_rot = pose3d.QuaternionNormalize(root_rot)
-                    root_rot = motion_util.standardize_quaternion(root_rot)
-                    motion_data[
-                        f_i,
-                        self.ROOT_ROT_START_IDX:self.ROOT_ROT_END_IDX] = root_rot
-                
-                # Compute velocities from position differences
-                frame_rate = 30.0  # 30Hz
-                dt = 1.0 / frame_rate
-                
-                # Only compute velocities if we have at least 2 frames
-                if motion_data.shape[0] > 1:
-                    # Compute linear velocities (root position)
-                    lin_vel = np.zeros((motion_data.shape[0], self.LINEAR_VEL_SIZE))
-                    # Skip first frame for velocities since we need two frames to compute
-                    for f_i in range(1, motion_data.shape[0]):
-                        pos_curr = self.get_root_pos(motion_data[f_i])
-                        pos_prev = self.get_root_pos(motion_data[f_i-1])
-                        lin_vel[f_i] = (pos_curr - pos_prev) / dt
-                    
-                    # Compute angular velocities (from quaternions)
-                    ang_vel = np.zeros((motion_data.shape[0], self.ANGULAR_VEL_SIZE))
-                    for f_i in range(1, motion_data.shape[0]):
-                        quat_curr = self.get_root_rot(motion_data[f_i])
-                        quat_prev = self.get_root_rot(motion_data[f_i-1])
-                        
-                        # Get the relative rotation between frames
-                        quat_diff = transformations.quaternion_multiply(
-                            quat_curr,
-                            transformations.quaternion_inverse(quat_prev)
-                        )
-                        
-                        # Convert to axis-angle representation
-                        axis, angle = pose3d.QuaternionToAxisAngle(quat_diff)
+            # Handle different file formats - assume text file with space/comma-separated values
+            with open(motion_file, "r") as f:
+                if motion_file.endswith('.csv'):
+                    # Reset file pointer and read as CSV
+                    f.seek(0)
+                    motion_data = []
+                    for line in f:
+                        # Split by comma and convert to float
+                        values = [float(x) for x in line.strip().split(',')]
+                        motion_data.append(values)
+                        # print(f"Loaded {len(values)} values from {motion_file}.")
+                motion_data = np.array(motion_data)
+                frame_duration = 0.02  # Assume 30fps for text files
+                motion_weight = 1.0
 
-                        # Ensure angle is in the range [0, pi]
-                        if angle > np.pi:
-                            angle = 2 * np.pi - angle
-                            axis = -axis
-                        
-                        # Angular velocity is axis * angle / dt
-                        ang_vel[f_i] = axis * angle / dt
-                        ang_vel[f_i] = self.world_to_body(ang_vel[f_i], quat_curr)
-                        lin_vel[f_i] = self.world_to_body(lin_vel[f_i], quat_curr)
-                    
-                    # Compute joint velocities
-                    joint_vel = np.zeros((motion_data.shape[0], self.JOINT_VEL_SIZE))
-                    for f_i in range(1, motion_data.shape[0]):
-                        joint_curr = self.get_joint_pose(motion_data[f_i])
-                        joint_prev = self.get_joint_pose(motion_data[f_i-1])
-                        joint_vel[f_i] = (joint_curr - joint_prev) / dt
-                    
-                    # First frame velocities are the same as second frame to avoid zeros
-                    lin_vel[0] = lin_vel[1]
-                    ang_vel[0] = ang_vel[1]
-                    joint_vel[0] = joint_vel[1]
-                else:
-                    # If only one frame, all velocities are zero
-                    lin_vel = np.zeros((motion_data.shape[0], self.LINEAR_VEL_SIZE))
-                    ang_vel = np.zeros((motion_data.shape[0], self.ANGULAR_VEL_SIZE))
-                    joint_vel = np.zeros((motion_data.shape[0], self.JOINT_VEL_SIZE))
-                
-                # Store all computed velocities as properties in the class
-                self.lin_vel = torch.tensor(lin_vel, dtype=torch.float32, device=device)
-                self.ang_vel = torch.tensor(ang_vel, dtype=torch.float32, device=device)
-                # if self.selected_joint_indices is not None:
-                #     joint_vel = joint_vel[:, self.selected_joint_indices]
+            self.get_data(motion_data, device, frame_duration, motion_weight, motion_file, i)
 
-                self.joint_vel = torch.tensor(joint_vel, dtype=torch.float32, device=device)
-
-                
-                # Store trajectory data (without the first 7 dimensions for regular traj)
-                # if self.selected_joint_indices is not None:
-                #     joint_data = motion_data[:, self.JOINT_POS_START_IDX:self.JOINT_POS_END_IDX]
-                #     joint_data = joint_data[:, self.selected_joint_indices]  # 只选中指定索引
-                # else:
-                # joint_data = motion_data[:, self.JOINT_POS_START_IDX:self.JOINT_POS_END_IDX]
-
-                self.trajectories.append(torch.tensor(
-                    motion_data[:, self.JOINT_POS_START_IDX:self.JOINT_POS_END_IDX],
-                    dtype=torch.float32, device=device))
-
-                
-                # Store full trajectory data with velocities
-                # Create an extended motion data array that includes original data and computed velocities
-                extended_motion_data = np.zeros((motion_data.shape[0], motion_data.shape[1] + self.LINEAR_VEL_SIZE + self.ANGULAR_VEL_SIZE + self.JOINT_VEL_SIZE))
-                print(f"extended_motion_data shape: {extended_motion_data.shape}")
-                extended_motion_data[:, :motion_data.shape[1]] = motion_data  # Original data
-                # Fill in the rest of the extended motion data
-                
-                # Add velocities
-                extended_motion_data[:, self.LINEAR_VEL_START_IDX:self.LINEAR_VEL_END_IDX] = lin_vel
-                extended_motion_data[:, self.ANGULAR_VEL_START_IDX:self.ANGULAR_VEL_END_IDX] = ang_vel
-                extended_motion_data[:, self.JOINT_VEL_START_IDX:] = joint_vel
-                
-                self.extended_traj.append(torch.tensor(
-                    extended_motion_data[:, self.JOINT_POS_START_IDX:],
-                    dtype=torch.float32, device=device))
-                # Store extended data as tensor
-                self.trajectories_full.append(torch.tensor(
-                    extended_motion_data,
-                    dtype=torch.float32, device=device))
-                self.trajectory_idxs.append(i)
-                self.trajectory_weights.append(motion_weight)
-                self.trajectory_frame_durations.append(frame_duration)
-                traj_len = (motion_data.shape[0] - 1) * frame_duration
-                self.trajectory_lens.append(traj_len)
-                self.trajectory_num_frames.append(float(motion_data.shape[0]))
-
-                print(f"Loaded {traj_len}s motion from {motion_file}.")
-                
-            except Exception as e:
-                print(f"Error loading {motion_file}: {e}")
-                continue
-        
         # Handle empty trajectory case
         if not self.trajectory_weights:
             raise ValueError("No valid motion files were loaded")
@@ -268,15 +124,41 @@ class AMPLoader:
             print(f'Preloading {num_preload_transitions} transitions')
             traj_idxs = self.weighted_traj_idx_sample_batch(num_preload_transitions)
             times = self.traj_time_sample_batch(traj_idxs)
-            self.preloaded_s = self.get_full_frame_at_time_batch(traj_idxs, times)
-            self.preloaded_s_next = self.get_full_frame_at_time_batch(traj_idxs, times + self.time_between_frames)
+            self.preloaded_s = self.get_frame_at_time_batch(traj_idxs, times)
+            self.preloaded_s_next = self.get_frame_at_time_batch(traj_idxs, times + self.time_between_frames)
             print(f'Finished preloading')
 
-        self.all_trajectories_full = torch.vstack(self.trajectories_full) if self.trajectories_full else torch.tensor([])
-        print(f'trajectories shape: {self.trajectories[0].shape}')
-        print(f'trajectories_full shape: {self.trajectories_full[0].shape}')
-        print(f'all_trajectories_full shape: {self.all_trajectories_full.shape}')
+        print(f'trajectories shape: {self.trajectories[0].shape}, datatype: {self.datatype}')    
+
+    def get_data(self, motion_data, device, frame_duration, motion_weight, motion_file, i):
+        # Normalize and standardize quaternions
+        for f_i in range(motion_data.shape[0]):
+            root_rot = self.get_root_rot(motion_data[f_i])
+            root_rot = pose3d.QuaternionNormalize(root_rot)
+            root_rot = motion_util.standardize_quaternion(root_rot)
+            motion_data[
+                f_i,
+                self.ROOT_ROT_START_IDX:self.ROOT_ROT_END_IDX] = root_rot
         
+        # Compute velocities from position differences
+        frame_rate = 50  # 50Hz
+        dt = 1.0 / frame_rate
+    
+
+        self.trajectories.append(torch.tensor(
+            motion_data,
+            dtype=torch.float32, device=device))
+        
+        self.trajectory_idxs.append(i)
+        self.trajectory_weights.append(motion_weight)
+        self.trajectory_frame_durations.append(frame_duration)
+        traj_len = (motion_data.shape[0] - 1) * frame_duration
+        self.trajectory_lens.append(traj_len)
+        self.trajectory_num_frames.append(float(motion_data.shape[0]))
+
+        print(f"Loaded {traj_len}s motion from {motion_file}.")
+
+
     def get_root_pos(self, pose):
         """Get root position from a pose vector."""
         return pose[self.ROOT_POS_START_IDX:self.ROOT_POS_END_IDX]
@@ -346,10 +228,6 @@ class AMPLoader:
         """Linear interpolation between values."""
         return (1.0 - blend) * val0 + blend * val1
 
-    def get_trajectory(self, traj_idx):
-        """Returns trajectory of AMP observations."""
-        return self.trajectories_full[traj_idx]
-
     def get_frame_at_time(self, traj_idx, time):
         """Returns frame for the given trajectory at the specified time."""
         p = float(time) / self.trajectory_lens[traj_idx]
@@ -370,10 +248,10 @@ class AMPLoader:
         # Clamp indices to valid range
         idx_low = np.clip(idx_low, 0, n - 1)
         idx_high = np.clip(idx_high, 0, n - 1)
+        all_frame_starts = torch.zeros(len(traj_idxs), self.trajectories[0].shape[1], device=self.device)
+        all_frame_ends = torch.zeros(len(traj_idxs), self.trajectories[0].shape[1], device=self.device)
         
-        all_frame_starts = torch.zeros(len(traj_idxs), self.observation_dim, device=self.device)
-        all_frame_ends = torch.zeros(len(traj_idxs), self.observation_dim, device=self.device)
-        
+
         for traj_idx in set(traj_idxs):
             trajectory = self.trajectories[traj_idx]
             traj_mask = traj_idxs == traj_idx
@@ -382,107 +260,13 @@ class AMPLoader:
         
         blend = torch.tensor(p * n - idx_low, device=self.device, dtype=torch.float32).unsqueeze(-1)
         return self.slerp(all_frame_starts, all_frame_ends, blend)
-
-    def get_full_frame_at_time(self, traj_idx, time):
-        """Returns full frame for the given trajectory at the specified time."""
-        p = float(time) / self.trajectory_lens[traj_idx]
-        n = self.trajectories_full[traj_idx].shape[0]
-        idx_low, idx_high = int(np.floor(p * n)), int(np.ceil(p * n))
-        idx_high = min(idx_high, n - 1)  # Ensure we don't go out of bounds
-        frame_start = self.trajectories_full[traj_idx][idx_low]
-        frame_end = self.trajectories_full[traj_idx][idx_high]
-        blend = p * n - idx_low
-        return self.blend_frame_pose(frame_start, frame_end, blend)
-
-    def get_full_frame_at_time_batch(self, traj_idxs, times):
-        """Returns full frames for the given trajectories at the specified times."""
-        """找到时间点对应的各项观测量，并在低位高位之间进行插值，返回插值后观测量"""
-        p = times / np.maximum(self.trajectory_lens[traj_idxs], 1e-10)  # Avoid division by zero
-        n = self.trajectory_num_frames[traj_idxs]
-        idx_low, idx_high = np.floor(p * n).astype(np.int), np.ceil(p * n).astype(np.int)
-        
-        # Clamp indices to valid range
-        idx_low = np.clip(idx_low, 0, n - 1)  
-        idx_high = np.clip(idx_high, 0, n - 1)
-        
-        # Initialize tensors to hold the interpolation values
-        # For positions and orientations
-        all_frame_pos_starts = torch.zeros(len(traj_idxs), self.POS_SIZE, device=self.device)
-        all_frame_pos_ends = torch.zeros(len(traj_idxs), self.POS_SIZE, device=self.device)
-        all_frame_rot_starts = torch.zeros(len(traj_idxs), self.ROT_SIZE, device=self.device)
-        all_frame_rot_ends = torch.zeros(len(traj_idxs), self.ROT_SIZE, device=self.device)
-        all_frame_joint_starts = torch.zeros(len(traj_idxs), self.JOINT_POS_SIZE, device=self.device)
-        all_frame_joint_ends = torch.zeros(len(traj_idxs), self.JOINT_POS_SIZE, device=self.device)
-        
-        # For velocities
-        all_frame_lin_vel_starts = torch.zeros(len(traj_idxs), self.LINEAR_VEL_SIZE, device=self.device)
-        all_frame_lin_vel_ends = torch.zeros(len(traj_idxs), self.LINEAR_VEL_SIZE, device=self.device)
-        all_frame_ang_vel_starts = torch.zeros(len(traj_idxs), self.ANGULAR_VEL_SIZE, device=self.device)
-        all_frame_ang_vel_ends = torch.zeros(len(traj_idxs), self.ANGULAR_VEL_SIZE, device=self.device)
-        all_frame_joint_vel_starts = torch.zeros(len(traj_idxs), self.JOINT_VEL_SIZE, device=self.device)
-        all_frame_joint_vel_ends = torch.zeros(len(traj_idxs), self.JOINT_VEL_SIZE, device=self.device)
-        
-        
-        for traj_idx in set(traj_idxs):
-            trajectory = self.trajectories_full[traj_idx]
-            traj_mask = traj_idxs == traj_idx
-            
-            # Extract components for each trajectory's frames - positions and orientations
-            all_frame_pos_starts[traj_mask] = self.get_root_pos_batch(trajectory[idx_low[traj_mask]])
-            all_frame_pos_ends[traj_mask] = self.get_root_pos_batch(trajectory[idx_high[traj_mask]])
-            
-            all_frame_rot_starts[traj_mask] = self.get_root_rot_batch(trajectory[idx_low[traj_mask]])
-            all_frame_rot_ends[traj_mask] = self.get_root_rot_batch(trajectory[idx_high[traj_mask]])
-            
-            all_frame_joint_starts[traj_mask] = self.get_joint_pose_batch(trajectory[idx_low[traj_mask]])
-            all_frame_joint_ends[traj_mask] = self.get_joint_pose_batch(trajectory[idx_high[traj_mask]])
-            
-            # Extract velocity components
-            all_frame_lin_vel_starts[traj_mask] = self.get_linear_vel_batch(trajectory[idx_low[traj_mask]])
-            all_frame_lin_vel_ends[traj_mask] = self.get_linear_vel_batch(trajectory[idx_high[traj_mask]])
-            
-            all_frame_ang_vel_starts[traj_mask] = self.get_angular_vel_batch(trajectory[idx_low[traj_mask]])
-            all_frame_ang_vel_ends[traj_mask] = self.get_angular_vel_batch(trajectory[idx_high[traj_mask]])
-            
-            all_frame_joint_vel_starts[traj_mask] = self.get_joint_vel_batch(trajectory[idx_low[traj_mask]])
-            all_frame_joint_vel_ends[traj_mask] = self.get_joint_vel_batch(trajectory[idx_high[traj_mask]])
-        
-        blend = torch.tensor(p * n - idx_low, device=self.device, dtype=torch.float32).unsqueeze(-1)
-
-        # Interpolate position linearly
-        pos_blend = self.slerp(all_frame_pos_starts, all_frame_pos_ends, blend)
-        
-        # Use quaternion interpolation for rotation
-        rot_blend = utils.quaternion_slerp(all_frame_rot_starts, all_frame_rot_ends, blend)
-        
-        # Interpolate joint positions and velocities linearly
-        joint_blend = self.slerp(all_frame_joint_starts, all_frame_joint_ends, blend)
-        lin_vel_blend = self.slerp(all_frame_lin_vel_starts, all_frame_lin_vel_ends, blend)
-        ang_vel_blend = self.slerp(all_frame_ang_vel_starts, all_frame_ang_vel_ends, blend)
-        joint_vel_blend = self.slerp(all_frame_joint_vel_starts, all_frame_joint_vel_ends, blend)
-        
-        # Combine all components
-        return torch.cat([
-            pos_blend, 
-            rot_blend, 
-            joint_blend, 
-            lin_vel_blend, 
-            ang_vel_blend, 
-            joint_vel_blend
-        ], dim=-1)
-
+   
     def get_frame(self):
         """Returns random frame."""
         traj_idx = self.weighted_traj_idx_sample()
         sampled_time = self.traj_time_sample(traj_idx)
         return self.get_frame_at_time(traj_idx, sampled_time)
-
-    def get_full_frame(self):
-        """Returns random full frame."""
-        traj_idx = self.weighted_traj_idx_sample()
-        sampled_time = self.traj_time_sample(traj_idx)
-        return self.get_full_frame_at_time(traj_idx, sampled_time)
-
+    
     def get_full_frame_batch(self, num_frames):
         """Returns a batch of random full frames."""
         if self.preload_transitions:
@@ -492,7 +276,7 @@ class AMPLoader:
         else:
             traj_idxs = self.weighted_traj_idx_sample_batch(num_frames)
             times = self.traj_time_sample_batch(traj_idxs)
-            return self.get_full_frame_at_time_batch(traj_idxs, times)
+            return self.get_frame_at_time_batch(traj_idxs, times)
 
     def blend_frame_pose(self, frame0, frame1, blend):
         """Linearly interpolate between two frames, including orientation.
@@ -559,7 +343,12 @@ class AMPLoader:
                     self.preloaded_s.shape[0], size=mini_batch_size)
                 
                 # Get only the joint positions for the state
-                s = self.preloaded_s[idxs, self.JOINT_POS_START_IDX:self.JOINT_VEL_END_IDX]
+                # if self.datatype == "Joint":
+                s = self.preloaded_s[idxs, self.JOINT_POS_START_IDX:]
+                # s = self.preloaded_s[idxs, self.JOINT_POS_START_IDX:self.ANGULAR_VEL_END_IDX]
+
+                # else:
+                #     s = self.preloaded_s[idxs, self.JOINT_POS_START_IDX:self.ANGULAR_VEL_END_IDX]
                 
                 # Add root height (Z coordinate)
                 s = torch.cat([
@@ -567,45 +356,21 @@ class AMPLoader:
                     self.preloaded_s[idxs, self.ROOT_POS_START_IDX + 2:self.ROOT_POS_START_IDX + 3]], dim=-1)
                 
                 # Same for next state
-                s_next = self.preloaded_s_next[idxs, self.JOINT_POS_START_IDX:self.JOINT_VEL_END_IDX]
+                # if self.datatype == "Joint":
+                s_next = self.preloaded_s_next[idxs, self.JOINT_POS_START_IDX:]
+                # s_next = self.preloaded_s_next[idxs, self.JOINT_POS_START_IDX:self.ANGULAR_VEL_END_IDX]
+                # else:
+                #     s_next = self.preloaded_s_next[idxs, self.JOINT_POS_START_IDX:self.ANGULAR_VEL_END_IDX]
                 s_next = torch.cat([
                     s_next,
                     self.preloaded_s_next[idxs, self.ROOT_POS_START_IDX + 2:self.ROOT_POS_START_IDX + 3]], dim=-1)
-            else:
-                s, s_next = [], []
-                traj_idxs = self.weighted_traj_idx_sample_batch(mini_batch_size)
-                times = self.traj_time_sample_batch(traj_idxs)
-                
-                for traj_idx, frame_time in zip(traj_idxs, times):
-                    frame = self.get_frame_at_time(traj_idx, frame_time)
-                    next_frame = self.get_frame_at_time(traj_idx, frame_time + self.time_between_frames)
-                    
-                    # We need to get the root height for each frame
-                    full_frame = self.get_full_frame_at_time(traj_idx, frame_time)
-                    full_next_frame = self.get_full_frame_at_time(traj_idx, frame_time + self.time_between_frames)
-                    
-                    # Append joint positions and root height
-                    s.append(torch.cat([frame, full_frame[self.ROOT_POS_START_IDX + 2:self.ROOT_POS_START_IDX + 3]]))
-                    s_next.append(torch.cat([next_frame, full_next_frame[self.ROOT_POS_START_IDX + 2:self.ROOT_POS_START_IDX + 3]]))
-                
-                s = torch.stack(s)
-                s_next = torch.stack(s_next)
-            
             yield s, s_next
-
-    def world_to_body(self, vec_w, quat_wb):
-        """
-        把世界系向量 vec_w (长度3) 旋到机体系。
-        """
-        # Pinocchio/pybullet 四元数顺序 = (x, y, z, w)；transformations 也如此
-        q_bw = transformations.quaternion_inverse(quat_wb)          # q^{-1}
-        vec_q = np.concatenate([vec_w, [0.0]])                       # (x,y,z,0)
-        rotated = transformations.quaternion_multiply(
-                    transformations.quaternion_multiply(q_bw, vec_q),
-                    quat_wb)[:3]
-        return rotated
 
     @property
     def observation_dim(self):
         """Size of AMP observations."""
-        return self.extended_traj[0].shape[1] + 1 # Joint positions + root height
+        # if self.datatype == "Joint":
+        return self.trajectories[0].shape[1] - 6
+        # return self.trajectories[0].shape[1] - 6 - 11 * 4 # Joint positions + lin_vel + ang_vel+ root height
+        # else:
+        #     return self.trajectories[0].shape[1] - 6 - self.JOINT_POS_SIZE
