@@ -3,7 +3,7 @@ import numpy as np
 from fastdtw import fastdtw
 import matplotlib.pyplot as plt
 from legged_gym.envs import *
-from legged_gym.utils import get_args, task_registry
+from legged_gym.utils import get_args, task_registry, export_policy_as_jit
 from scipy.signal import find_peaks
 from scipy.spatial.distance import euclidean
 from isaacgym.torch_utils import *
@@ -135,6 +135,11 @@ def play(args):
     train_cfg.runner.resume = True
     ppo_runner, train_cfg = task_registry.make_alg_runner(env=env, name=args.task, args=args, train_cfg=train_cfg)
     policy = ppo_runner.get_inference_policy(device=env.device)
+
+    if EXPORT_POLICY:
+        path = os.path.join(LEGGED_GYM_ROOT_DIR, 'logs', train_cfg.runner.experiment_name, 'exported', 'policies')
+        export_policy_as_jit(ppo_runner.alg.policy, path)
+        print('Exported policy as jit script to: ', path)
 
     # === 2. 加载 Reference AMP obs（CSV）===
     ref_csv_file = ref_csv if 'ref_csv' in locals() else "datasets/cartesian_with_orientation_from_simulation/forward_1.0.csv"
@@ -371,9 +376,10 @@ def play(args):
 
 if __name__ == '__main__':
     args = get_args()
-    WRITE_CSV = True  # 是否写入CSV
+    WRITE_CSV = False  # 是否写入CSV
     RECORD_FRAMES = False
     FIXED_CAMERA = False
+    EXPORT_POLICY = True
     # 你可以支持 --ref_csv xxx.csv
     if not hasattr(args, 'ref_csv'):
         args.task = 'g1_21'
