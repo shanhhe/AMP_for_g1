@@ -90,7 +90,7 @@ def play(args):
     env_cfg, train_cfg = task_registry.get_cfgs(name=args.task)
     # override some parameters for testing
     env_cfg.env.num_envs = min(env_cfg.env.num_envs, 1)
-    env_cfg.env.reference_state_initialization = False
+    env_cfg.env.reference_state_initialization = True
     env_cfg.terrain.num_rows = 1
     env_cfg.terrain.num_cols = 1
     env_cfg.terrain.curriculum = False
@@ -99,15 +99,16 @@ def play(args):
     env_cfg.domain_rand.push_robots = False
     env_cfg.domain_rand.randomize_gains = False
     env_cfg.domain_rand.randomize_base_mass = False
-    env_cfg.commands.ranges.lin_vel_x =  [1.0, 1.0]
+    env_cfg.commands.ranges.lin_vel_x =  [0.1, 0.1]
     env_cfg.commands.ranges.lin_vel_y = [0.0, 0.0]
-    env_cfg.commands.ranges.ang_vel_yaw = [0.0, 0.0]
+    env_cfg.commands.ranges.ang_vel_yaw = [0.5, 0.5]
     env_cfg.commands.ranges.heading = [0.0, 0.0]
-    env_cfg.commands.resampling_time = 4.0
-    env_cfg.commands.linear_increasing_commands_for_play = False
-    env_cfg.commands.increasing_scale = 0.5
+    env_cfg.commands.resampling_time = 5.0
+    # env_cfg.asset.fix_base_link = True  # Fix the base link to avoid falling
+    # env_cfg.commands.linear_increasing_commands_for_play = True
+    # env_cfg.commands.increasing_scale = 0.9
     # env_cfg.env.episode_length_s = 75
-    env_cfg.env.episode_length_s = 20
+    env_cfg.env.episode_length_s = 10
     
 
     train_cfg.runner.amp_num_preload_transitions = 10
@@ -144,7 +145,7 @@ def play(args):
     num_frames = int(video_duration / env.dt)
 
     for i in range(int(env.max_episode_length)+10):
-        if i == int(38 / env.dt) and env_cfg.commands.linear_increasing_commands_for_play:
+        if i == int(28 / env.dt) and env_cfg.commands.linear_increasing_commands_for_play:
             print("Starting to reverse the commands.")
             env_cfg.commands.linear_decreasing_commands_for_play = True
 
@@ -227,12 +228,18 @@ def play(args):
                     'right_shoulder_roll_joint': env.dof_pos[robot_index, env.dof_names.index("right_shoulder_roll_joint")].item(),
                     'left_elbow_joint': env.dof_pos[robot_index, env.dof_names.index("left_elbow_joint")].item(),
                     'right_elbow_joint': env.dof_pos[robot_index, env.dof_names.index("right_elbow_joint")].item(),
+                    'left_wrist_pitch_joint': env.dof_pos[robot_index, env.dof_names.index("left_wrist_pitch_joint")].item(),
+                    'right_wrist_pitch_joint': env.dof_pos[robot_index, env.dof_names.index("right_wrist_pitch_joint")].item(),
+                    'left_wrist_roll_joint': env.dof_pos[robot_index, env.dof_names.index("left_wrist_roll_joint")].item(),
+                    'right_wrist_roll_joint': env.dof_pos[robot_index, env.dof_names.index("right_wrist_roll_joint")].item(),
+                    'left_wrist_yaw_joint': env.dof_pos[robot_index, env.dof_names.index("left_wrist_yaw_joint")].item(),
+                    'right_wrist_yaw_joint': env.dof_pos[robot_index, env.dof_names.index("right_wrist_yaw_joint")].item(),
                 }
             )
-        elif i==stop_state_log:
+        elif i==stop_state_log and args.plot_states:
                 # logger.plot_waist_states(run_name=args.load_run)
-                logger.plot_states(run_name=args.load_run)
-                # logger.plot_single_state(key=['base_vel_yaw'], run_name=args.load_run)
+                # logger.plot_states(run_name=args.load_run)
+                logger.plot_single_state(key=['left_hip_pitch_joint', 'left_hip_roll_joint', 'left_hip_yaw_joint'], run_name=args.load_run)
                 # logger.plot_contact_phase(run_name=args.load_run)
                 print("Plotted states.")
         if  0 < i < stop_rew_log:
@@ -251,5 +258,6 @@ if __name__ == '__main__':
     MOVE_CAMERA = False
     FIXED_CAMERA = True
     args = get_args()
+    args.plot_states = False  # Set to True to plot states
     args.real_time_factor = 1.0  # Set to 0 for no real-time factor
     play(args)

@@ -31,22 +31,23 @@ import glob
 
 from legged_gym.envs.base.g1_legged_robot_config import G1LeggedRobotCfg, G1LeggedRobotCfgPPO
 
-MOTION_FILES = glob.glob('datasets/joint_from_simulation/forward_1.0.csv')  # Replace with your actual path to the motion files
+MOTION_FILES = glob.glob('datasets/customed_g1/fist.csv')
+# MOTION_FILES = glob.glob('datasets/joint_from_simulation/forward_1.0.csv')  # Replace with your actual path to the motion files
 CARTESIAN_MOTION_FILES = glob.glob('datasets/cartesian_with_orientation_from_simulation/forward_1.0.csv')  # Replace with your actual path to the motion files
 CARTESIAN_AND_JOINT_MOTION_FILES = glob.glob('datasets/joints_and_cartesian_from_simulation/forward_1.0.csv')
 
 
-class G121AMPCfg( G1LeggedRobotCfg ):
+class G129AMPCfg( G1LeggedRobotCfg ):
 
     class env( G1LeggedRobotCfg.env ):
-        num_actions = 21
-        num_envs = 4096
+        num_actions = 29
+        num_envs = 2048
         include_history_steps = None  # Number of steps of history to include.
         # 3 + 3 + 3 + 3 + 21 + 21 + 21 + 2 = 77
         # num_observations = 74
         # num_privileged_obs = 77
-        num_observations = 72 #original amp
-        num_privileged_obs = 75
+        num_observations = 96 #original amp
+        num_privileged_obs = 99
         reference_state_initialization = True
         reference_state_initialization_prob = 1
         amp_motion_files = MOTION_FILES
@@ -56,6 +57,7 @@ class G121AMPCfg( G1LeggedRobotCfg ):
                                 "torso_link", "head_link",
                               "left_shoulder_roll_link", "left_elbow_link", "left_rubber_hand",
                               "right_shoulder_roll_link", "right_elbow_link", "right_rubber_hand"]
+        key_point_names = ["left_wrist_yaw_link", "right_wrist_yaw_link", "left_ankle_roll_link", "right_ankle_roll_link"]
         data_type = 'joint'  # 'cartesian' or 'joint' or 'joints_and_cartesian'
 
     class init_state( G1LeggedRobotCfg.init_state ):
@@ -80,10 +82,19 @@ class G121AMPCfg( G1LeggedRobotCfg ):
 
             'left_shoulder_pitch_joint': 0.0,   # [rad]
             'left_shoulder_roll_joint': 0.0,   # [rad]
+            'left_shoulder_yaw_joint': 0.0,   # [rad]
             'left_elbow_joint': 0.0,   # [rad]
+            'left_wrist_roll_joint': 0.0,   # [rad]
+            'left_wrist_pitch_joint': 0.0,   # [rad]
+            'left_wrist_yaw_joint': 0.0,   # [rad]
+
             'right_shoulder_pitch_joint': 0.0,   # [rad]
             'right_shoulder_roll_joint': 0.0,   # [rad]
+            'right_shoulder_yaw_joint': 0.0,   # [rad]
             'right_elbow_joint': 0.0,   # [rad]
+            'right_wrist_roll_joint': 0.0,   # [rad]
+            'right_wrist_pitch_joint': 0.0,   # [rad]
+            'right_wrist_yaw_joint': 0.0,   # [rad]
         }
 
     class control( G1LeggedRobotCfg.control ):
@@ -100,7 +111,10 @@ class G121AMPCfg( G1LeggedRobotCfg ):
                      'shoulder_pitch': 90,
                      'shoulder_roll': 60,
                      'shoulder_yaw': 20.,
-                     'elbow': 60
+                     'elbow': 60,
+                     'wrist_roll': 10,
+                     'wrist_pitch': 20,
+                     'wrist_yaw': 20,
                     #  'ankle_pitch': 35,
                     #  'ankle_roll': 30,
                      }  # [N*m/rad]
@@ -115,7 +129,11 @@ class G121AMPCfg( G1LeggedRobotCfg ):
                      'shoulder_pitch': 2,
                      'shoulder_roll': 1,
                      'shoulder_yaw': 0.4,
-                     'elbow': 1
+                     'elbow': 1,
+                     'wrist_roll': 0.4,
+                     'wrist_pitch': 0.2,
+                     'wrist_yaw': 0.4,
+
  
  
                     #  'ankle_pitch': 4,
@@ -131,7 +149,7 @@ class G121AMPCfg( G1LeggedRobotCfg ):
         measure_heights = False
 
     class asset( G1LeggedRobotCfg.asset ):
-        file = '{LEGGED_GYM_ROOT_DIR}/resources/robots/g1_description/g1_21dof.urdf'
+        file = '{LEGGED_GYM_ROOT_DIR}/resources/robots/g1_description/g1_29dof.urdf'
         name = 'g1_amp'
         foot_name = "ankle_roll"
         penalize_contacts_on = ["head", "hip", "wrist", "torso", "shoulder", "elbow", "knee"]
@@ -141,9 +159,13 @@ class G121AMPCfg( G1LeggedRobotCfg ):
         self_collisions = 0 # 1 to disable, 0 to enable...bitwise filter
         flip_visual_attachments = False
         terminate_after_base_z = 0.4
+        # selected_joint_indices = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11,
+        #                             12, 13, 14,
+        #                             15, 16, 18, 22, 23, 25]  # 指定你想保留的关节索引
         selected_joint_indices = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11,
                                     12, 13, 14,
-                                    15, 16, 18, 22, 23, 25]  # 指定你想保留的关节索引
+                                    15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28]
+        end_effector_name = "right_wrist_yaw_link"
         
     class domain_rand:
         randomize_friction = True
@@ -162,7 +184,7 @@ class G121AMPCfg( G1LeggedRobotCfg ):
         noise_level = 1.0 # scales other values
         class noise_scales:
             dof_pos = 0.03
-            dof_vel = 1.5
+            dof_vel = 1.0
             lin_vel = 0.1
             ang_vel = 0.3
             gravity = 0.05
@@ -211,18 +233,19 @@ class G121AMPCfg( G1LeggedRobotCfg ):
             # stance_swing_coordination = 2.0
             # swing_height = 0.5
 
-            tracking_lin_vel = 8.0
-            tracking_ang_vel = 5.0
-            lin_vel_z = -2.0
-            ang_vel_xy = -0.05
-            orientation = 1.0
-            base_height = -10.0
+            tracking_lin_vel = 0.0
+            tracking_ang_vel = 0.0
+            # lin_vel_z = -2.0
+            # ang_vel_xy = -0.05
+            # orientation = 1.0
+            # base_height = -1.0
+            strike = 20.0
             dof_acc = -2.5e-7
             dof_vel = -1e-3
             feet_air_time = 0.0
-            collision = -5.0
+            collision = -0.5
             action_rate = -0.01
-            dof_pos_limits = -5.0
+            dof_pos_limits = -2.0
             # minimize_torso_angular_velocity = 2.0
             # minimize_waist_pitch_deviation = 1.0
             # minimize_waist_roll_deviation = 1.0
@@ -238,25 +261,35 @@ class G121AMPCfg( G1LeggedRobotCfg ):
         linear_increasing_commands_for_play = False # if true: increase the linear velocity commands during play
         linear_decreasing_commands_for_play = False
         class ranges:
-            lin_vel_x = [-0.3, 1.2] # min max [m/s]
-            lin_vel_y = [-0.3, 0.3]   # min max [m/s]
-            ang_vel_yaw = [-0.3, 0.3]    # min max [rad/s]
+            # lin_vel_x = [-0.3, 1.2] # min max [m/s]
+            # lin_vel_y = [-0.3, 0.3]   # min max [m/s]
+            # ang_vel_yaw = [-0.3, 0.3]    # min max [rad/s]
+            # heading = [-3.14, 3.14]
+            lin_vel_x = [-0.9, 1.75] # min max [m/s]
+            lin_vel_y = [-1.4, 0.58]   # min max [m/s]
+            ang_vel_yaw = [-7, 4.4]    # min max [rad/s]
             heading = [-3.14, 3.14]
+            target_radius = [0.8, 1.2] # min max [m]
+            target_theta = [-1, 1] # min max [rad]
+            target_z = 1.0 # min max [m]
+
 
     # class sim( G1LeggedRobotCfg.sim ):
     #     dt = 0.005
 
-class G121AMPCfgPPO( G1LeggedRobotCfgPPO ):
+class G129AMPCfgPPO( G1LeggedRobotCfgPPO ):
     runner_class_name = 'G1AMPOnPolicyRunner'
     class algorithm( G1LeggedRobotCfgPPO.algorithm ):
-        entropy_coef = 0.01
+        entropy_coef = 0.01 # 0.005 for cartesian, 0.015 for joint space
+        # entropy_coef = 0.012 # 0.005 for cartesian, 0.015 for joint space
         amp_replay_buffer_size = 1000000
         num_learning_epochs = 5
         num_mini_batches = 4
+        gamma = 0.99
 
         # # -- Random Network Distillation
         # class rnd_cfg: 
-        #     weight = 0.0 # initial weight of the RND reward
+        #     weight = 100.0 # initial weight of the RND reward
 
         #     # note: This is a dictionary with a required key called "mode".
         #     #   Please check the RND module for more information.
@@ -271,9 +304,9 @@ class G121AMPCfgPPO( G1LeggedRobotCfgPPO ):
         #     # -- Network parameters
         #     # note: if -1, then the network will use dimensions of the observation
         #     num_outputs = 1  # number of outputs of RND network
-        #     predictor_hidden_dims = [-1] # hidden dimensions of predictor network
-        #     target_hidden_dims = [-1]  # hidden dimensions of target network
-        
+        #     predictor_hidden_dims = [16, 16] # hidden dimensions of predictor network
+        #     target_hidden_dims = [16]  # hidden dimensions of target network
+
         # class symmetry_cfg:
 
         #     use_data_augmentation = True  # this adds symmetric trajectories to the batch
@@ -296,23 +329,23 @@ class G121AMPCfgPPO( G1LeggedRobotCfgPPO ):
         #     mirror_loss_coeff = 0.0
 
     class runner( G1LeggedRobotCfgPPO.runner ):
-        run_name = 'init_amp_reward_coef0.6'
-        experiment_name = 'dance'
+        run_name = 'init_gamma0.99_addkeypos_change_taskreward'
+        experiment_name = 'fight_new_task'
         algorithm_class_name = 'AMPPPO'
         policy_class_name = 'ActorCritic'
-        max_iterations = 50000 # number of policy updates
+        max_iterations = 20000 # number of policy updates
         empirical_normalization = True # whether to use empirical normalization of the observations
         save_interval = 100
 
-        amp_reward_coef = 0.6
+        amp_reward_coef = 0.2
         amp_motion_files = MOTION_FILES
         amp_cartesian_motion_files = CARTESIAN_MOTION_FILES
         amp_cartesian_and_joint_motion_files = CARTESIAN_AND_JOINT_MOTION_FILES
         
-        amp_num_preload_transitions = 200000
+        amp_num_preload_transitions = 2000000
         amp_task_reward_lerp = 0.3 # smaller to rely more on style reward(imitation)
         amp_discr_hidden_dims = [1024, 512]
 
-        min_normalized_std = [0.02] * 21
+        min_normalized_std = [0.02] * 29
 
   

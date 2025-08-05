@@ -47,7 +47,7 @@ from legged_gym.utils.terrain import Terrain
 from legged_gym.utils.math import quat_apply_yaw, wrap_to_pi, torch_rand_sqrt_float
 from legged_gym.utils.helpers import class_to_dict
 from .g1_legged_robot_config import G1LeggedRobotCfg
-from rsl_rl.datasets.g1_motion_loader import AMPLoader
+from rsl_rl.datasets.g1_motion_loader_old import AMPLoader
 import random
 
 
@@ -93,6 +93,8 @@ class G1LeggedRobot(BaseTask):
                                         time_between_frames=self.dt, 
                                         selected_joint_indices=self.cfg.asset.selected_joint_indices)
         self.cartesian_data_link_indices = [self.body_names.index(link_name) for link_name in self.cfg.env.g1_cartesian_link_names if link_name in self.body_names]
+        self.key_point_indices = [self.body_names.index(link_name) for link_name in self.cfg.env.key_point_names if link_name in self.body_names]
+        self.end_effector_index = self.body_names.index(self.cfg.asset.end_effector_name)
 
     def reset(self):
         """ Reset all robots"""
@@ -148,6 +150,7 @@ class G1LeggedRobot(BaseTask):
         # prepare extras
         self.extras["observations"] = {}
         self.extras["observations"]["critic"] = self.privileged_obs_buf
+        self.extras["observations"]["rnd_state"] = self.privileged_obs_buf
         
         return policy_obs, self.rew_buf, self.reset_buf, self.extras, reset_env_ids, terminal_amp_states
 
@@ -177,6 +180,7 @@ class G1LeggedRobot(BaseTask):
         }
         return policy_obs, extras
 
+
     def post_physics_step(self):
         """ check terminations, compute observations and rewards
             calls self._post_physics_step_callback() for common computations 
@@ -198,6 +202,10 @@ class G1LeggedRobot(BaseTask):
         self.lin_vel_error_buf[:] = torch.sum(torch.square(self.commands[:, :2] - self.base_lin_vel[:, :2]), dim=1)
         self.ang_vel_error_buf[:] = torch.square(self.commands[:, 2] - self.base_ang_vel[:, 2])
 
+        eff_dist = torch.norm(self.rigid_body_states[:, self.end_effector_index, 0:3] - self.target_pos, dim=1)
+        hit_now = (eff_dist < 0.10)
+        self.has_his = torch.logical_or(self.has_his, hit_now)
+
         self._post_physics_step_callback()
 
         # compute observations, rewards, resets, ...
@@ -212,6 +220,7 @@ class G1LeggedRobot(BaseTask):
         self.last_dof_vel[:] = self.dof_vel[:]
         self.last_root_vel[:] = self.root_states[:, 7:13]
 
+        # self._draw_target_marker()  # Draw targets if needed
         if self.viewer and self.enable_viewer_sync and self.debug_viz:
             self._draw_debug_vis()
 
@@ -268,6 +277,8 @@ class G1LeggedRobot(BaseTask):
             self.randomized_p_gains[env_ids] = new_randomized_gains[0]
             self.randomized_d_gains[env_ids] = new_randomized_gains[1]
 
+        self._reset_target_pos(env_ids)
+
         # reset buffers
         self.last_actions[env_ids] = 0.
         self.last_dof_vel[env_ids] = 0.
@@ -313,33 +324,6 @@ class G1LeggedRobot(BaseTask):
     def compute_observations(self):
         """ Computes observations
         """
-        if torch.isnan(self.base_lin_vel).any():
-            print("NaN in base_lin_vel")
-            self.base_lin_vel = torch.nan_to_num(self.base_lin_vel)
-            
-        if torch.isnan(self.base_ang_vel).any():
-            print("NaN in base_ang_vel")
-            self.base_ang_vel = torch.nan_to_num(self.base_ang_vel)
-            
-        if torch.isnan(self.projected_gravity).any():
-            print("NaN in projected_gravity")
-            self.projected_gravity = torch.nan_to_num(self.projected_gravity)
-        
-        if torch.isnan(self.commands).any():
-            print("NaN in commands")
-            self.commands = torch.nan_to_num(self.commands)
-        
-        if torch.isnan(self.dof_pos).any():
-            print("NaN in dof_pos")
-            self.dof_pos = torch.nan_to_num(self.dof_pos)
-            
-        if torch.isnan(self.dof_vel).any():
-            print("NaN in dof_vel")
-            self.dof_vel = torch.nan_to_num(self.dof_vel)
-            
-        if torch.isnan(self.actions).any():
-            print("NaN in actions")
-            self.actions = torch.nan_to_num(self.actions)
         self.privileged_obs_buf = torch.cat((  self.base_lin_vel * self.obs_scales.lin_vel,
                                     self.base_ang_vel  * self.obs_scales.ang_vel,
                                     self.projected_gravity,
@@ -348,10 +332,6 @@ class G1LeggedRobot(BaseTask):
                                     self.dof_vel * self.obs_scales.dof_vel,
                                     self.actions
                                     ),dim=-1)
-        # Add to compute_observations method
-        if torch.isnan(self.privileged_obs_buf).any():
-            print("NaN detected in privileged_obs_buf!")
-            self.privileged_obs_buf = torch.nan_to_num(self.privileged_obs_buf)
         # add perceptive inputs if not blind
         if self.cfg.terrain.measure_heights:
             heights = torch.clip(self.root_states[:, 2].unsqueeze(1) - 0.5 - self.measured_heights, -1, 1.) * self.obs_scales.height_measurements
@@ -381,7 +361,40 @@ class G1LeggedRobot(BaseTask):
             joint_vel = self.dof_vel # 21
             z_pos = self.root_states[:, 2:3] # 1
             # return torch.cat((joint_pos, foot_pos, base_lin_vel, base_ang_vel, joint_vel, z_pos), dim=-1)
-            return torch.cat((joint_pos, base_lin_vel, base_ang_vel, joint_vel, z_pos), dim=-1)
+
+            N = self.num_envs
+            K = len(self.key_point_indices)
+
+            # 基座四元数
+            base_q = self.base_quat                  # (N,4)
+
+            # 把 base_q expand 到 (N,K,4) 再展平
+            base_q_exp = base_q.unsqueeze(1).expand(N, K, 4).reshape(N*K, 4)  # (N*K,4)
+            base_q_inv = quat_conjugate(base_q_exp.reshape(N, K, 4))  # (N*K,4)
+
+            # --- 1) link pos & vel world → local ---
+            world_key_body_pose = self.rigid_body_states[:, self.key_point_indices, 0:3]   # (N,K,3)
+            world_key_body_vel = self.rigid_body_states[:, self.key_point_indices, 7:10]  # (N,K,3)
+            world_key_body_quat = self.rigid_body_states[:, self.key_point_indices, 3:7]  # (N,K,4)
+
+            local_key_body_pos = world_key_body_pose - self.root_states[:, 0:3].unsqueeze(1)  # (N,K,3)
+            local_key_body_vel = world_key_body_vel - self.root_states[:, 7:10].unsqueeze(1)  # (N,K,3)
+            local_link_quat = quat_mul(base_q_inv, world_key_body_quat) # (N,K,4) 
+
+            # 展平
+            flat_end_pos = local_key_body_pos.view(N*K, 3)            # (N*K,3)
+            flat_end_vel = local_key_body_vel.view(N*K, 3)            # (N*K,3)
+            
+
+            # 逆旋转到本地
+            local_end_pos = quat_rotate_inverse(base_q_exp, flat_end_pos)  # (N*K,3)
+            local_end_vel = quat_rotate_inverse(base_q_exp, flat_end_vel)  # (N*K,3)
+
+            # 再恢复 (N, K*3)
+            flat_local_key_pos = local_end_pos.view(N, K*3)
+            flat_local_link_quat = local_link_quat.reshape(N, K * 4)  # (N,K*4)
+
+            return torch.cat((joint_pos, base_lin_vel, base_ang_vel, joint_vel, flat_local_key_pos, flat_local_link_quat, z_pos), dim=-1)
         elif self.cfg.env.data_type == 'cartesian' or self.cfg.env.data_type == 'joints_and_cartesian':
             N = self.num_envs
             K = len(self.cartesian_data_link_indices)
@@ -553,6 +566,7 @@ class G1LeggedRobot(BaseTask):
             self._linear_commands(env_ids)
         else:
             self._resample_commands(env_ids)
+        self._reset_target_pos(env_ids)
         if self.cfg.commands.heading_command:
             forward = quat_apply(self.base_quat, self.forward_vec)
             heading = torch.atan2(forward[:, 1], forward[:, 0])
@@ -834,6 +848,8 @@ class G1LeggedRobot(BaseTask):
         
         self.lin_vel_error_buf = torch.zeros(self.num_envs, dtype=torch.float, device=self.device, requires_grad=False)
         self.ang_vel_error_buf = torch.zeros(self.num_envs, dtype=torch.float, device=self.device, requires_grad=False)
+        self.target_pos = torch.zeros(self.num_envs, 3, dtype=torch.float, device=self.device, requires_grad=False)
+        self.has_his = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device, requires_grad=False) # used to track if the robot has a history of actions
 
         if self.cfg.terrain.measure_heights:
             # 初始化用于存储测量高度的张量
@@ -1094,6 +1110,8 @@ class G1LeggedRobot(BaseTask):
         env_lower = gymapi.Vec3(0., 0., 0.)
         env_upper = gymapi.Vec3(0., 0., 0.)
         self.actor_handles = []
+        self.target_handles = [] # <--- 在循环前新建 handle 列表
+        target_sphere_asset = self.gym.create_sphere(self.sim, 0.01, gymapi.AssetOptions()) # 半径可改
         self.envs = []
         for i in range(self.num_envs):
             # create env instance
@@ -1114,6 +1132,13 @@ class G1LeggedRobot(BaseTask):
             self.actor_handles.append(actor_handle)
             
         self.dof_dict = self.gym.get_actor_dof_dict(self.envs[0], self.actor_handles[0])
+        print(f"DOF dict: {self.dof_dict}")
+        # # 得到 dof 索引 -> 名字
+        # dof_names = self.gym.get_actor_dof_names(self.envs[0], self.actor_handles[0])
+        # # 或者得到名字 -> 索引，并确保按索引顺序排列
+        # dof_dict = self.gym.get_actor_dof_dict(self.envs[0], self.actor_handles[0])
+        # sorted_dof_names = [name for name, _ in sorted(dof_dict.items(), key=lambda x: x[1])]
+        # print(f"Sorted DOF names: {sorted_dof_names}")
         self.knee_indices = torch.zeros(len(knee_names), dtype=torch.long, device=self.device, requires_grad=False)
         self.feet_indices = torch.zeros(len(feet_names), dtype=torch.long, device=self.device, requires_grad=False)
         for i in range(len(feet_names)):
@@ -1188,6 +1213,21 @@ class G1LeggedRobot(BaseTask):
                 z = heights[j]
                 sphere_pose = gymapi.Transform(gymapi.Vec3(x, y, z), r=None)
                 gymutil.draw_lines(sphere_geom, self.gym, self.viewer, self.envs[i], sphere_pose) 
+    
+    def _draw_target_marker(self):
+        """Draw wireframe spheres at target positions for all envs."""
+        if not hasattr(self, "viewer") or self.viewer is None:
+            return
+        # 可选：清理旧线
+        self.gym.clear_lines(self.viewer)
+
+        # 球半径、颜色可以自定义
+        sphere_geom = gymutil.WireframeSphereGeometry(0.07, 6, 6, None, color=(1, 0, 0))  # 红色
+        for i in range(self.num_envs):
+            target_pos = (self.target_pos[i]).cpu().numpy()
+            sphere_pose = gymapi.Transform()
+            sphere_pose.p = gymapi.Vec3(*target_pos.tolist())
+            gymutil.draw_lines(sphere_geom, self.gym, self.viewer, self.envs[i], sphere_pose)
 
     def _init_height_points(self):
         """ Returns points at which the height measurments are sampled (in base frame)

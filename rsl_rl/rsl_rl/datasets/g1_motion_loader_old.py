@@ -28,12 +28,13 @@ class AMPLoader:
         # Sizes of each component
         self.POS_SIZE = 3
         self.ROT_SIZE = 4
-        self.TORSO_ROT_SIZE = 4  # For Cartesian data, torso orientation is included
     
         # Derived velocities - these will be computed
         self.LINEAR_VEL_SIZE = 3
         self.ANGULAR_VEL_SIZE = 3
-        self.TORSO_VEL_SIZE = 3  # For Cartesian data, torso angular velocity is included
+
+        self.KEY_POINT_POS_SIZE = 3 * 4
+        self.KEY_POINT_QUAT_SIZE = 4 * 4
 
         self.ROOT_POS_START_IDX = 0
         self.ROOT_POS_END_IDX = self.ROOT_POS_START_IDX + self.POS_SIZE # 3
@@ -44,12 +45,7 @@ class AMPLoader:
         self.JOINT_POS_START_IDX = self.ROOT_ROT_END_IDX
         self.JOINT_POS_END_IDX = self.JOINT_POS_START_IDX + self.JOINT_POS_SIZE # 7 + num_dofs
 
-        if self.datatype == "Cartesian":
-            self.TORSO_ROT_START_IDX = self.JOINT_POS_END_IDX
-            self.TORSO_ROT_END_IDX = self.TORSO_ROT_START_IDX + self.TORSO_ROT_SIZE
-            self.LINEAR_VEL_START_IDX = self.TORSO_ROT_END_IDX
-        else:
-            self.LINEAR_VEL_START_IDX = self.JOINT_POS_END_IDX
+        self.LINEAR_VEL_START_IDX = self.JOINT_POS_END_IDX
         self.LINEAR_VEL_END_IDX = self.LINEAR_VEL_START_IDX + self.LINEAR_VEL_SIZE # 10 + num_dofs
 
         self.ANGULAR_VEL_START_IDX = self.LINEAR_VEL_END_IDX
@@ -58,12 +54,14 @@ class AMPLoader:
         self.JOINT_VEL_START_IDX = self.ANGULAR_VEL_END_IDX
         self.JOINT_VEL_END_IDX = self.JOINT_VEL_START_IDX + self.JOINT_VEL_SIZE # 13 + 2 * num_dofs
 
-        if self.datatype == "Cartesian":
-            self.TORSO_VEL_START_IDX = self.JOINT_VEL_END_IDX
-            self.TORSO_VEL_END_IDX = self.TORSO_VEL_START_IDX + self.TORSO_VEL_SIZE  # 3 for torso angular velocity
+        self.KEY_POINT_POS_START_IDX = self.JOINT_VEL_END_IDX
+        self.KEY_POINT_POS_END_IDX = self.KEY_POINT_POS_START_IDX + self.KEY_POINT_POS_SIZE
+        print(f"Key point position indices: {self.KEY_POINT_POS_START_IDX} to {self.KEY_POINT_POS_END_IDX}")
 
-    
-    
+        self.KEY_POINT_QUAT_START_IDX = self.KEY_POINT_POS_END_IDX
+        self.KEY_POINT_QUAT_END_IDX = self.KEY_POINT_QUAT_START_IDX + self.KEY_POINT_QUAT_SIZE
+        print(f"Key point quaternion indices: {self.KEY_POINT_QUAT_START_IDX} to {self.KEY_POINT_QUAT_END_IDX}")
+
     def __init__(
             self,
             device,
@@ -109,14 +107,16 @@ class AMPLoader:
                     motion_weight = float(motion_json.get("MotionWeight", 1.0))
                 except json.JSONDecodeError:
                     # If not JSON, check file extension
-                    if motion_file.endswith('.csv') and 'joint' in motion_file.lower():
+                    print(f"Loading motion data from {motion_file}")
+                    if motion_file.endswith('.csv'):
                         # Reset file pointer and read as CSV
                         f.seek(0)
                         motion_data = []
+                        key_pos_data = []
                         for line in f:
                             # Split by comma and convert to float
                             values = [float(x) for x in line.strip().split(',')]
-                            if len(values) == 36:  # Ensure line has expected number of values
+                            if len(values) == 36 + self.KEY_POINT_POS_SIZE + self.KEY_POINT_QUAT_SIZE:  # Ensure line has expected number of values
                                 motion_data.append(values[:7])
                                 for j in self.selected_joint_indices:
                                     # # Append the joint positions for the selected indices
@@ -130,6 +130,7 @@ class AMPLoader:
                                     # add random noise to joint positions
                                     # sigma = np.deg2rad(10)
                                     # motion_data[-1].append(values[j+7] + np.random.normal(0, sigma))
+                                key_pos_data.append(values[36:])
                     else:
                         # Assume it's a text file with space-separated values
                         f.seek(0)
@@ -141,14 +142,14 @@ class AMPLoader:
                             values = [float(x) for x in line.strip().split(',')]
                             motion_data.append(values)
                     motion_data = np.array(motion_data)
+                    key_pos_data = np.array(key_pos_data)
                     frame_duration = 1.0/30.0  # Assume 30fps for text files
                     motion_weight = 1.0
-
             if self.datatype == "Joint":
-                self.get_joint_data(motion_data, device, frame_duration, motion_weight, motion_file, i)
+                self.get_joint_data(motion_data, key_pos_data, device, frame_duration, motion_weight, motion_file, i)
             elif self.datatype == "Cartesian":
-                self.get_cartesian_data(motion_data, device, frame_duration, motion_weight, motion_file, i)
-        
+                self.get_cartesian_data(motion_data, key_pos_data, device, frame_duration, motion_weight, motion_file, i)
+
         # Handle empty trajectory case
         if not self.trajectory_weights:
             raise ValueError("No valid motion files were loaded")
@@ -181,7 +182,7 @@ class AMPLoader:
         print(f'all_trajectories_full shape: {self.all_trajectories_full.shape}')
     
 
-    def get_joint_data(self, motion_data, device, frame_duration, motion_weight, motion_file, i):
+    def get_joint_data(self, motion_data, key_pos_data, device, frame_duration, motion_weight, motion_file, i):
         # Normalize and standardize quaternions
         for f_i in range(motion_data.shape[0]):
             root_rot = self.get_root_rot(motion_data[f_i])
@@ -270,15 +271,17 @@ class AMPLoader:
         
         # Store full trajectory data with velocities
         # Create an extended motion data array that includes original data and computed velocities
-        extended_motion_data = np.zeros((motion_data.shape[0], motion_data.shape[1] + self.LINEAR_VEL_SIZE + self.ANGULAR_VEL_SIZE + self.JOINT_VEL_SIZE))
+        extended_motion_data = np.zeros((motion_data.shape[0], motion_data.shape[1] + self.LINEAR_VEL_SIZE + self.ANGULAR_VEL_SIZE + self.JOINT_VEL_SIZE + key_pos_data.shape[1]))
         extended_motion_data[:, :motion_data.shape[1]] = motion_data  # Original data
         # Fill in the rest of the extended motion data
-        
+        print(f"Extended motion data shape: {extended_motion_data.shape}")
         # Add velocities
         extended_motion_data[:, self.LINEAR_VEL_START_IDX:self.LINEAR_VEL_END_IDX] = lin_vel
         extended_motion_data[:, self.ANGULAR_VEL_START_IDX:self.ANGULAR_VEL_END_IDX] = ang_vel
-        extended_motion_data[:, self.JOINT_VEL_START_IDX:] = joint_vel
-        
+        extended_motion_data[:, self.JOINT_VEL_START_IDX:self.JOINT_VEL_END_IDX] = joint_vel
+        # Add key point positions and orientations to the end of the extended motion data
+        extended_motion_data[:, self.KEY_POINT_POS_START_IDX:self.KEY_POINT_QUAT_END_IDX] = key_pos_data
+
         self.extended_traj.append(torch.tensor(
             extended_motion_data[:, self.JOINT_POS_START_IDX:],
             dtype=torch.float32, device=device))
@@ -295,7 +298,7 @@ class AMPLoader:
 
         print(f"Loaded {traj_len}s motion from {motion_file}.")
 
-    def get_cartesian_data(self, motion_data, device, frame_duration, motion_weight, motion_file, i):
+    def get_cartesian_data(self, motion_data, key_pos_data, device, frame_duration, motion_weight, motion_file, i):
         """Process motion data in Cartesian format."""
         # Normalize and standardize quaternions
         for f_i in range(motion_data.shape[0]):
@@ -395,7 +398,7 @@ class AMPLoader:
     
         # Store full trajectory data with velocities
         # Create an extended motion data array that includes original data and computed velocities
-        extended_motion_data = np.zeros((motion_data.shape[0], motion_data.shape[1] + self.LINEAR_VEL_SIZE + self.ANGULAR_VEL_SIZE + self.JOINT_VEL_SIZE + self.TORSO_VEL_SIZE))
+        extended_motion_data = np.zeros((motion_data.shape[0], motion_data.shape[1] + self.LINEAR_VEL_SIZE + self.ANGULAR_VEL_SIZE + self.JOINT_VEL_SIZE + self.KEY_POINT_POS_SIZE + self.KEY_POINT_QUAT_SIZE))
 
         extended_motion_data[:, :motion_data.shape[1]] = motion_data  # Original data
         # Fill in the rest of the extended motion data
@@ -405,8 +408,8 @@ class AMPLoader:
         extended_motion_data[:, self.ANGULAR_VEL_START_IDX:self.ANGULAR_VEL_END_IDX] = ang_vel
         extended_motion_data[:, self.JOINT_VEL_START_IDX:self.JOINT_VEL_END_IDX] = joint_vel
 
-        # Add torso angular velocity to the end of the extended motion data
-        extended_motion_data[:, self.TORSO_VEL_START_IDX:self.TORSO_VEL_END_IDX] = torso_ang_vel
+        # Add key point positions and orientations to the end of the extended motion data
+        extended_motion_data[:, self.KEY_POINT_POS_START_IDX:self.KEY_POINT_POS_END_IDX] = motion_data[:, :self.KEY_POINT_QUAT_SIZE + self.KEY_POINT_POS_SIZE]
         self.extended_traj.append(torch.tensor(
             extended_motion_data[:, self.JOINT_POS_START_IDX:],
             dtype=torch.float32, device=device))
@@ -447,14 +450,6 @@ class AMPLoader:
         """Get joint poses from a batch of pose vectors."""
         return poses[:, self.JOINT_POS_START_IDX:self.JOINT_POS_END_IDX]
 
-    def get_torso_pose(self, pose):
-        """Get torso orientation from a pose vector."""
-        return pose[self.TORSO_ROT_START_IDX:self.TORSO_ROT_END_IDX]
-
-    def get_torso_pose_batch(self, poses):
-        """Get torso orientations from a batch of pose vectors."""
-        return poses[:, self.TORSO_ROT_START_IDX:self.TORSO_ROT_END_IDX]
-
     def get_linear_vel(self, pose):
         return pose[self.LINEAR_VEL_START_IDX:self.LINEAR_VEL_END_IDX]
     
@@ -472,12 +467,6 @@ class AMPLoader:
 
     def get_joint_vel_batch(self, poses):
         return poses[:, self.JOINT_VEL_START_IDX:self.JOINT_VEL_END_IDX]
-
-    def get_torso_vel(self, pose):
-        return pose[self.TORSO_VEL_START_IDX:self.TORSO_VEL_END_IDX]
-
-    def get_torso_vel_batch(self, poses):
-        return poses[:, self.TORSO_VEL_START_IDX:self.TORSO_VEL_END_IDX]
 
     def weighted_traj_idx_sample(self):
         """Get traj idx via weighted sampling."""
@@ -573,8 +562,10 @@ class AMPLoader:
         all_frame_rot_ends = torch.zeros(len(traj_idxs), self.ROT_SIZE, device=self.device)
         all_frame_joint_starts = torch.zeros(len(traj_idxs), self.JOINT_POS_SIZE, device=self.device)
         all_frame_joint_ends = torch.zeros(len(traj_idxs), self.JOINT_POS_SIZE, device=self.device)
-        all_frame_torso_starts = torch.zeros(len(traj_idxs), self.TORSO_ROT_SIZE, device=self.device)  # For torso orientation
-        all_frame_torso_ends = torch.zeros(len(traj_idxs), self.TORSO_ROT_SIZE, device=self.device)  # For torso orientation
+        all_frame_key_pos_starts = torch.zeros(len(traj_idxs), self.KEY_POINT_POS_SIZE, device=self.device)
+        all_frame_key_pos_ends = torch.zeros(len(traj_idxs), self.KEY_POINT_POS_SIZE, device=self.device)
+        all_frame_key_quat_starts = torch.zeros(len(traj_idxs), self.KEY_POINT_QUAT_SIZE, device=self.device)
+        all_frame_key_quat_ends = torch.zeros(len(traj_idxs), self.KEY_POINT_QUAT_SIZE, device=self.device)
 
         # For velocities
         all_frame_lin_vel_starts = torch.zeros(len(traj_idxs), self.LINEAR_VEL_SIZE, device=self.device)
@@ -583,8 +574,6 @@ class AMPLoader:
         all_frame_ang_vel_ends = torch.zeros(len(traj_idxs), self.ANGULAR_VEL_SIZE, device=self.device)
         all_frame_joint_vel_starts = torch.zeros(len(traj_idxs), self.JOINT_VEL_SIZE, device=self.device)
         all_frame_joint_vel_ends = torch.zeros(len(traj_idxs), self.JOINT_VEL_SIZE, device=self.device)
-        all_frame_torso_ang_vel_starts = torch.zeros(len(traj_idxs), self.TORSO_VEL_SIZE, device=self.device)  # For torso angular velocity
-        all_frame_torso_ang_vel_ends = torch.zeros(len(traj_idxs), self.TORSO_VEL_SIZE, device=self.device)  # For torso angular velocity
 
         
         for traj_idx in set(traj_idxs):
@@ -611,19 +600,18 @@ class AMPLoader:
             all_frame_joint_vel_starts[traj_mask] = self.get_joint_vel_batch(trajectory[idx_low[traj_mask]])
             all_frame_joint_vel_ends[traj_mask] = self.get_joint_vel_batch(trajectory[idx_high[traj_mask]])
 
-            if self.datatype == "Cartesian":
-                # Extract torso orientation
-                all_frame_torso_starts[traj_mask] = self.get_torso_pose_batch(trajectory[idx_low[traj_mask]])
-                all_frame_torso_ends[traj_mask] = self.get_torso_pose_batch(trajectory[idx_high[traj_mask]])
-                all_frame_torso_ang_vel_starts[traj_mask] = self.get_torso_vel_batch(trajectory[idx_low[traj_mask]])
-                all_frame_torso_ang_vel_ends[traj_mask] = self.get_torso_vel_batch(trajectory[idx_high[traj_mask]])
+            # Extract key point positions and orientations
+            all_frame_key_pos_starts[traj_mask] = trajectory[idx_low[traj_mask], self.KEY_POINT_POS_START_IDX:self.KEY_POINT_POS_END_IDX]
+            all_frame_key_pos_ends[traj_mask] = trajectory[idx_high[traj_mask], self.KEY_POINT_POS_START_IDX:self.KEY_POINT_POS_END_IDX]
+            
+            all_frame_key_quat_starts[traj_mask] = trajectory[idx_low[traj_mask], self.KEY_POINT_QUAT_START_IDX:self.KEY_POINT_QUAT_END_IDX]
+            all_frame_key_quat_ends[traj_mask] = trajectory[idx_high[traj_mask], self.KEY_POINT_QUAT_START_IDX:self.KEY_POINT_QUAT_END_IDX]
+
         
         blend = torch.tensor(p * n - idx_low, device=self.device, dtype=torch.float32).unsqueeze(-1)
 
         # Interpolate position linearly
         pos_blend = self.slerp(all_frame_pos_starts, all_frame_pos_ends, blend)
-        # Interpolate torso orientation linearly
-        torso_blend = self.slerp(all_frame_torso_starts, all_frame_torso_ends, blend)
         
         # Use quaternion interpolation for rotation
         rot_blend = utils.quaternion_slerp(all_frame_rot_starts, all_frame_rot_ends, blend)
@@ -634,7 +622,10 @@ class AMPLoader:
         lin_vel_blend = self.slerp(all_frame_lin_vel_starts, all_frame_lin_vel_ends, blend)
         ang_vel_blend = self.slerp(all_frame_ang_vel_starts, all_frame_ang_vel_ends, blend)
         joint_vel_blend = self.slerp(all_frame_joint_vel_starts, all_frame_joint_vel_ends, blend)
-        torso_ang_vel_blend = self.slerp(all_frame_torso_ang_vel_starts, all_frame_torso_ang_vel_ends, blend)
+
+        # Key point positions and orientations
+        key_pos_blend = self.slerp(all_frame_key_pos_starts, all_frame_key_pos_ends, blend)
+        key_quat_blend = self.slerp(all_frame_key_quat_starts, all_frame_key_quat_ends, blend)
         
         if self.datatype == "Cartesian":
             # Combine all components
@@ -642,11 +633,11 @@ class AMPLoader:
                 pos_blend, 
                 rot_blend,
                 joint_blend,
-                torso_blend,
                 lin_vel_blend, 
                 ang_vel_blend, 
                 joint_vel_blend,
-                torso_ang_vel_blend
+                key_pos_blend,
+                key_quat_blend
             ], dim=-1)
         else:
             return torch.cat([
@@ -655,7 +646,9 @@ class AMPLoader:
                 joint_blend,
                 lin_vel_blend,
                 ang_vel_blend,
-                joint_vel_blend
+                joint_vel_blend,
+                key_pos_blend,
+                key_quat_blend
             ], dim=-1)
 
     def get_frame(self):
@@ -746,17 +739,15 @@ class AMPLoader:
                     self.preloaded_s.shape[0], size=mini_batch_size)
                 
                 # Get only the joint positions for the state
-                s = self.preloaded_s[idxs, self.JOINT_POS_START_IDX:self.TORSO_VEL_END_IDX]
-                # s = self.preloaded_s[idxs, self.LINEAR_VEL_START_IDX:self.ANGULAR_VEL_END_IDX]
-                
+                s = self.preloaded_s[idxs, self.JOINT_POS_START_IDX:]
+
                 # Add root height (Z coordinate)
                 s = torch.cat([
                     s,
                     self.preloaded_s[idxs, self.ROOT_POS_START_IDX + 2:self.ROOT_POS_START_IDX + 3]], dim=-1)
                 
                 # Same for next state
-                s_next = self.preloaded_s_next[idxs, self.JOINT_POS_START_IDX:self.TORSO_VEL_END_IDX]
-                # s_next = self.preloaded_s_next[idxs, self.LINEAR_VEL_START_IDX:self.ANGULAR_VEL_END_IDX]
+                s_next = self.preloaded_s_next[idxs, self.JOINT_POS_START_IDX:]
                 s_next = torch.cat([
                     s_next,
                     self.preloaded_s_next[idxs, self.ROOT_POS_START_IDX + 2:self.ROOT_POS_START_IDX + 3]], dim=-1)

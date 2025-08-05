@@ -3,7 +3,7 @@ import os
 from legged_gym.envs import *
 from legged_gym.utils import  get_args, task_registry
 from isaacgym.torch_utils import *
-
+import pandas as pd
 import numpy as np
 
 def quat_normalize(q, eps=1e-8):
@@ -25,11 +25,18 @@ def update_camera_position(env, robot_index, camera_offset):
     # Update the camera position and look-at target
     env.set_camera(new_camera_position, robot_position)
 
+def get_commands():
+    motion_file = 'data/commands/fight2_velocity.csv'
+    commands = pd.read_csv(motion_file, header=None).values
+    return commands
+
 def play(args):
+    # commands = get_commands()
+    # print(f"Commands shape: {commands.shape}, first command: {commands[0]}")
     env_cfg, train_cfg = task_registry.get_cfgs(name=args.task)
     # override some parameters for testing
     env_cfg.env.num_envs = min(env_cfg.env.num_envs + 1, 1)
-    env_cfg.env.reference_state_initialization = False
+    env_cfg.env.reference_state_initialization = True
     env_cfg.terrain.num_rows = 1
     env_cfg.terrain.num_cols = 1
     env_cfg.terrain.curriculum = False
@@ -38,10 +45,14 @@ def play(args):
     env_cfg.domain_rand.push_robots = False
     env_cfg.domain_rand.randomize_gains = False
     env_cfg.domain_rand.randomize_base_mass = False
+    env_cfg.env.reference_state_initialization = True
     env_cfg.commands.ranges.lin_vel_x =  [1.0, 1.0]  # range of linear velocity in x direction
-    env_cfg.commands.ranges.lin_vel_y = [0.0, 0.0]
-    env_cfg.commands.ranges.ang_vel_yaw = [0.0, 0.0]
-    env_cfg.commands.resampling_time = 3.5
+    env_cfg.commands.ranges.lin_vel_y = [-0.5, -0.5]
+    env_cfg.commands.ranges.ang_vel_yaw = [-4.0, -4.0]
+    env_cfg.commands.ranges.target_point_radius = [1.0, 1.0]  # range of target point radius
+    env_cfg.commands.ranges.target_point_theta = [np.pi, np.pi]
+    env_cfg.commands.ranges.target_z = 1.3  # target point z coordinate
+    env_cfg.commands.resampling_time = 0.0333
     log = False
     # env_cfg.commands.linear_increasing_commands_for_play = True
     # env_cfg.commands.increasing_scale = 0.5
@@ -61,13 +72,18 @@ def play(args):
     stop_state_log = env.max_episode_length - 2# number of steps before plotting states
     camera_offset = np.array([2.0, 0.0, 1.0])  # Adjust this offset as needed
     N = env.num_envs
-    K = len(env.cartesian_data_link_indices)
+    K = len(env.key_point_indices)
     outputs_cartesian = []
     outputs_joint = []
     outputs_joints_and_cartesian = []
     outputs_cartesian_withorientation = []
 
     for i in range(int(env.max_episode_length)):
+        # k = i // 5 % commands.shape[0]
+        # # print(f"Step {i}, command: {commands[k]}")
+        # env.command_ranges["lin_vel_x"] =  [commands[k, 0], commands[k, 0]]
+        # env.command_ranges["lin_vel_y"] = [commands[k, 1], commands[k, 1]]
+        # env.command_ranges["ang_vel_yaw"] = [commands[k, 2], commands[k, 2]]
         update_camera_position(env, robot_index, camera_offset)
         # if i >= int(2 / env.dt):
         actions = policy(obs.detach())

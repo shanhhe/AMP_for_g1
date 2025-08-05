@@ -51,6 +51,10 @@ def play(args):
     env_cfg.domain_rand.push_robots = False
     env_cfg.domain_rand.randomize_gains = False
     env_cfg.domain_rand.randomize_base_mass = False
+    env_cfg.commands.ranges.target_point_radius = [1.0, 1.0]  # range of target point radius
+    env_cfg.commands.ranges.target_point_theta = [np.pi, np.pi]
+    env_cfg.commands.ranges.target_z = 1.3  # target point z coordinate
+    env_cfg.env.max_episode_length = 10
 
     train_cfg.runner.amp_num_preload_transitions = 10
 
@@ -79,7 +83,7 @@ def play(args):
     camera_direction = np.array(env_cfg.viewer.lookat) - np.array(env_cfg.viewer.pos)
     img_idx = 0
 
-    for i in range(10*int(env.max_episode_length)):
+    for i in range(2 * int(env.max_episode_length)):
         actions = policy(obs.detach())
         obs, rews, dones, infos, _, _ = env.step(actions.detach())
         if RECORD_FRAMES:
@@ -119,7 +123,7 @@ def play(args):
             logger.print_rewards()
 
 if __name__ == '__main__':
-    EXPORT_POLICY = True
+    EXPORT_POLICY = False
     RECORD_FRAMES = False
     MOVE_CAMERA = False
     args = get_args()

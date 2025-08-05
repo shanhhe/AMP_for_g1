@@ -24,7 +24,7 @@ from rsl_rl.env import VecEnv
 from rsl_rl.utils import store_code_state
 
 from rsl_rl.algorithms.amp_discriminator import AMPDiscriminator
-from rsl_rl.datasets.g1_motion_loader import AMPLoader
+from rsl_rl.datasets.g1_motion_loader_old import AMPLoader
 from rsl_rl.utils.utils import Normalizer
 
 class G1AMPOnPolicyRunner:
@@ -100,7 +100,7 @@ class G1AMPOnPolicyRunner:
             # add rnd gated state to config
             self.alg_cfg["rnd_cfg"]["num_states"] = num_rnd_state
             # scale down the rnd weight with timestep (similar to how rewards are scaled down in legged_gym envs)
-            self.alg_cfg["rnd_cfg"]["weight"] *= env.unwrapped.step_dt
+            self.alg_cfg["rnd_cfg"]["weight"] *= env.dt
         
         # if using symmetry then pass the environment config object
         if "symmetry_cfg" in self.alg_cfg and self.alg_cfg["symmetry_cfg"] is not None:
@@ -173,6 +173,8 @@ class G1AMPOnPolicyRunner:
         self.tot_time = 0
         self.current_learning_iteration = 0
         self.git_status_repos = [rsl_rl.__file__]
+
+        _, _ = self.env.reset()
 
     
     def learn(self, num_learning_iterations: int, init_at_random_ep_len: bool = False):  # noqa: C901

@@ -1,4 +1,4 @@
-<robot name="g1_29dof_rev_1_0">
+<robot name="g1_15dof">
   <mujoco>
     <compiler meshdir="meshes" discardvisual="false"/>
   </mujoco>
@@ -174,7 +174,7 @@
     <inertial>
       <origin xyz="-0.007269 0 0.011137" rpy="0 0 0"/>
       <mass value="0.074"/>
-      <inertia ixx="8.4E-06" ixy="0" ixz="-2.9E-06" iyy="1.89E-05" iyz="0" izz="1.26E-05"/>
+      <inertia ixx="0.01" ixy="0" ixz="-2.9E-06" iyy="0.01" iyz="0" izz="0.01"/>
     </inertial>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0"/>
@@ -203,7 +203,7 @@
     <inertial>
       <origin xyz="0.026505 0 -0.016425" rpy="0 0 0"/>
       <mass value="0.608"/>
-      <inertia ixx="0.0002231" ixy="2E-07" ixz="8.91E-05" iyy="0.0016161" iyz="-1E-07" izz="0.0016667"/>
+      <inertia ixx="0.01" ixy="2E-07" ixz="8.91E-05" iyy="0.01" iyz="-1E-07" izz="0.01"/>
     </inertial>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0"/>
@@ -366,7 +366,7 @@
     <inertial>
       <origin xyz="-0.007269 0 0.011137" rpy="0 0 0"/>
       <mass value="0.074"/>
-      <inertia ixx="8.4E-06" ixy="0" ixz="-2.9E-06" iyy="1.89E-05" iyz="0" izz="1.26E-05"/>
+      <inertia ixx="0.01" ixy="0" ixz="-2.9E-06" iyy="0.01" iyz="0" izz="0.01"/>
     </inertial>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0"/>
@@ -395,7 +395,7 @@
     <inertial>
       <origin xyz="0.026505 0 -0.016425" rpy="0 0 0"/>
       <mass value="0.608"/>
-      <inertia ixx="0.0002231" ixy="-2E-07" ixz="8.91E-05" iyy="0.0016161" iyz="1E-07" izz="0.0016667"/>
+      <inertia ixx="0.01" ixy="-2E-07" ixz="8.91E-05" iyy="0.01" iyz="1E-07" izz="0.01"/>
     </inertial>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0"/>
@@ -441,15 +441,15 @@
 
   <!-- Torso -->
   <link name="waist_yaw_link">
-    <inertial>
-      <origin xyz="0.003494 0.000233 0.018034" rpy="0 0 0"/>
-      <mass value="0.214"/>
-      <inertia ixx="0.00010673" ixy="2.703E-06" ixz="-7.631E-06" iyy="0.00010422" iyz="-2.01E-07" izz="0.0001625"/>
+  <inertial>
+      <origin xyz="0.003964 0 0.018769" rpy="0 0 0"/>
+      <mass value="0.244"/>
+      <inertia ixx="9.9587E-05" ixy="-1.833E-06" ixz="-1.2617E-05" iyy="0.00012411" iyz="-1.18E-07" izz="0.00015586"/>
     </inertial>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0"/>
       <geometry>
-        <mesh filename="meshes/waist_yaw_link_rev_1_0.STL"/>
+        <mesh filename="meshes/waist_yaw_link.STL"/>
       </geometry>
       <material name="white">
         <color rgba="0.7 0.7 0.7 1"/>
