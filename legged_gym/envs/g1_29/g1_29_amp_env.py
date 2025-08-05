@@ -56,7 +56,7 @@ class G129AMPRobot(G1LeggedRobot):
         target_z = torch.full((len(env_ids), 1), self.cfg.commands.ranges.target_z, device=self.device)   # [N, 1]
 
         self.target_pos[env_ids] = torch.cat([target_xy, target_z], dim=-1)  # [N, 3]
-        self.has_his[env_ids] = False  # 重置 has_his 状态
+        self.has_hit[env_ids] = False  # 重置 has_his 状态
         
     def _reward_strike(self):
         # 1. 位置和速度
@@ -74,9 +74,6 @@ class G129AMPRobot(G1LeggedRobot):
         eff_dist = torch.norm(x_star - x_eff, dim=1)
         root_dist = torch.norm(x_star - x_root, dim=1)
 
-        # 4. has_hit
-        has_hit = (eff_dist < 0.30)  # 你可以根据实际情况调整阈值
-
         # 5. r_near
         dot_v = torch.sum(d_star_unit * x_eff_dot, dim=1)
         r_near = 0.2 * torch.exp(-2 * eff_dist**2) + 0.8 * torch.clamp((2/3) * dot_v, 0, 1)
@@ -89,7 +86,7 @@ class G129AMPRobot(G1LeggedRobot):
 
         # 7. reward 逻辑
         reward = torch.where(
-            has_hit,
+            self.has_hit,
             torch.ones_like(root_dist),
             torch.where(
                 root_dist < 1.375,

@@ -204,7 +204,7 @@ class G1LeggedRobot(BaseTask):
 
         eff_dist = torch.norm(self.rigid_body_states[:, self.end_effector_index, 0:3] - self.target_pos, dim=1)
         hit_now = (eff_dist < 0.10)
-        self.has_his = torch.logical_or(self.has_his, hit_now)
+        self.has_hit = torch.logical_or(self.has_hit, hit_now)
 
         self._post_physics_step_callback()
 
@@ -849,7 +849,7 @@ class G1LeggedRobot(BaseTask):
         self.lin_vel_error_buf = torch.zeros(self.num_envs, dtype=torch.float, device=self.device, requires_grad=False)
         self.ang_vel_error_buf = torch.zeros(self.num_envs, dtype=torch.float, device=self.device, requires_grad=False)
         self.target_pos = torch.zeros(self.num_envs, 3, dtype=torch.float, device=self.device, requires_grad=False)
-        self.has_his = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device, requires_grad=False) # used to track if the robot has a history of actions
+        self.has_hit = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device, requires_grad=False) # used to track if the robot has a history of actions
 
         if self.cfg.terrain.measure_heights:
             # 初始化用于存储测量高度的张量
