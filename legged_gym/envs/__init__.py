@@ -40,8 +40,8 @@ from .g1_leg.g1leg_amp_config import G1LEGAMPCfg, G1LEGAMPCfgPPO
 from .g1_leg.g1leg_amp_env import G1LEGAMPRobot
 from .g1_21.g1_21_amp_env import G121AMPRobot
 from .g1_21.g1_21_amp_config import G121AMPCfg, G121AMPCfgPPO
-from .g1_29.g1_29_amp_config import G129AMPCfg, G129AMPCfgPPO
-from .g1_29.g1_29_amp_env import G129AMPRobot
+from .g1_23.g1_23_amp_config import G123AMPCfg, G123AMPCfgPPO
+from .g1_23.g1_23_amp_env import G123AMPRobot
 
 
 import os
@@ -54,6 +54,6 @@ task_registry.register( "g1_amp", G1AMPRobot, G1AMPCfg(), G1AMPCfgPPO() )
 task_registry.register( "g1_leg", G1LeggedRobot, G1LEGAMPCfg(), G1LEGAMPCfgPPO() )
 # task_registry.register( "g1_leg", G1LEGAMPRobot, G1LEGAMPCfg(), G1LEGAMPCfgPPO() ) # unitree
 task_registry.register( "g1_21", G121AMPRobot, G121AMPCfg(), G121AMPCfgPPO() )  #unitree 21
-task_registry.register( "g1_29", G129AMPRobot, G129AMPCfg(), G129AMPCfgPPO() )  #unitree 29
+task_registry.register( "g1_23", G123AMPRobot, G123AMPCfg(), G123AMPCfgPPO() )  #unitree 23
 
 # task_registry.register("g1_21",G1LeggedRobot, G121AMPCfg(), G121AMPCfgPPO())

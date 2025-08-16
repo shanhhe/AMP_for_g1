@@ -5,16 +5,27 @@ from isaacgym.torch_utils import *
 from isaacgym import gymtorch, gymapi, gymutil
 import torch
 
-class G129AMPRobot(G1LeggedRobot):
+class G123AMPRobot(G1LeggedRobot):
     def compute_observations(self):
         """ Computes observations
         """
+        _, _, yaw = get_euler_xyz(self.base_quat)
+
+        # local offset 旋转到 world
+        cos_yaw = torch.cos(yaw)
+        sin_yaw = torch.sin(yaw)
+        rot_mat = torch.stack([
+            torch.stack([cos_yaw, sin_yaw], dim=1),
+            torch.stack([-sin_yaw,  cos_yaw], dim=1)
+        ], dim=1)  # [N, 2, 2]
+        world_target_offset = self.target_pos[:, :2] - self.root_states[:, :2]  # [N, 2]
+        local_target_offset = torch.bmm(rot_mat, world_target_offset.unsqueeze(-1)).squeeze(-1)  # [N, 2]
+        local_target_offset = torch.cat((local_target_offset, (self.target_pos[:, 2] - self.root_states[:, 2]).unsqueeze(1)), dim=-1)  # [N, 3]
         self.privileged_obs_buf = torch.cat((  self.base_lin_vel * self.obs_scales.lin_vel,
                                     self.base_ang_vel  * self.obs_scales.ang_vel,
                                     self.projected_gravity,
                                     # self.commands[:, :3] * self.commands_scale,
-                                    self.target_pos[:, :2] - self.root_states[:, :2],
-                                    self.target_pos[:, 2].unsqueeze(1),
+                                    local_target_offset,
                                     (self.dof_pos - self.default_dof_pos) * self.obs_scales.dof_pos,
                                     self.dof_vel * self.obs_scales.dof_vel,
                                     self.actions
@@ -41,6 +52,7 @@ class G129AMPRobot(G1LeggedRobot):
             env_ids = torch.arange(self.num_envs, device=self.device)
         # 采样 base/root 当前 xy 坐标
         base_pos = self.root_states[env_ids, :2]  # [N, 2]
+        _, _, yaw = get_euler_xyz(self.base_quat[env_ids])
 
         # 随机采样 target 的相对偏移（比如半径在 [0.5, 1.5] 米，角度 0-2pi）
         radius = torch.empty(len(env_ids), device=self.device).uniform_(self.cfg.commands.ranges.target_radius[0], self.cfg.commands.ranges.target_radius[1])
@@ -50,13 +62,23 @@ class G129AMPRobot(G1LeggedRobot):
             radius * torch.sin(theta)
         ], dim=-1)  # [N, 2]
 
+        # local offset 旋转到 world
+        cos_yaw = torch.cos(yaw)
+        sin_yaw = torch.sin(yaw)
+        rot_mat = torch.stack([
+            torch.stack([cos_yaw, -sin_yaw], dim=1),
+            torch.stack([sin_yaw,  cos_yaw], dim=1)
+        ], dim=1)  # [N, 2, 2]
+
+        offset_world = torch.bmm(rot_mat, offset.unsqueeze(-1)).squeeze(-1)  # [N, 2]
+
         # target 在世界坐标系下
-        target_xy = base_pos + offset  # [N, 2]
+        target_xy = base_pos + offset_world  # [N, 2]
 
-        target_z = torch.full((len(env_ids), 1), self.cfg.commands.ranges.target_z, device=self.device)   # [N, 1]
-
+        # target_z = torch.full((len(env_ids), 1), self.cfg.commands.ranges.target_z, device=self.device)   # [N, 1]
+        target_z = torch.empty(len(env_ids), device=self.device).uniform_(self.cfg.commands.ranges.target_z[0], self.cfg.commands.ranges.target_z[1]).unsqueeze(1)
         self.target_pos[env_ids] = torch.cat([target_xy, target_z], dim=-1)  # [N, 3]
-        self.has_hit[env_ids] = False  # 重置 has_his 状态
+        self.has_hit[env_ids] = False  # 重置 has_hit 状态
         
     def _reward_strike(self):
         # 1. 位置和速度

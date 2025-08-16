@@ -76,7 +76,7 @@ class G1LeggedRobot(BaseTask):
         self.cfg = cfg
         self.sim_params = sim_params
         self.height_samples = None
-        self.debug_viz = False
+        self.debug_viz = self.cfg.env.debug_viz
         self.init_done = False
         self._parse_cfg(self.cfg)
         super().__init__(self.cfg, sim_params, physics_engine, sim_device, headless)
@@ -94,6 +94,7 @@ class G1LeggedRobot(BaseTask):
                                         selected_joint_indices=self.cfg.asset.selected_joint_indices)
         self.cartesian_data_link_indices = [self.body_names.index(link_name) for link_name in self.cfg.env.g1_cartesian_link_names if link_name in self.body_names]
         self.key_point_indices = [self.body_names.index(link_name) for link_name in self.cfg.env.key_point_names if link_name in self.body_names]
+        print(f"Key point indices: {self.key_point_indices}")
         self.end_effector_index = self.body_names.index(self.cfg.asset.end_effector_name)
 
     def reset(self):
@@ -113,17 +114,8 @@ class G1LeggedRobot(BaseTask):
         Args:
             actions (torch.Tensor): Tensor of shape (num_envs, num_actions_per_env)
         """
-
-        # Debug step
-        if torch.isnan(actions).any().item():
-            print("  Actions contains NaN:")
-
         clip_actions = self.cfg.normalization.clip_actions
         self.actions = torch.clip(actions, -clip_actions, clip_actions).to(self.device)
-
-        # More debug
-        if torch.isnan(self.actions).any().item():
-            print("  After clipping - Actions contains NaN:")
         
         # step physics and render each frame
         self.render()
@@ -220,9 +212,10 @@ class G1LeggedRobot(BaseTask):
         self.last_dof_vel[:] = self.dof_vel[:]
         self.last_root_vel[:] = self.root_states[:, 7:13]
 
-        # self._draw_target_marker()  # Draw targets if needed
         if self.viewer and self.enable_viewer_sync and self.debug_viz:
-            self._draw_debug_vis()
+        # if self.viewer and self.debug_viz:
+            # self._draw_debug_vis()
+            self._draw_target_marker()  # Draw targets if needed
 
         return env_ids, terminal_amp_states
 
@@ -365,36 +358,15 @@ class G1LeggedRobot(BaseTask):
             N = self.num_envs
             K = len(self.key_point_indices)
 
-            # 基座四元数
-            base_q = self.base_quat                  # (N,4)
-
-            # 把 base_q expand 到 (N,K,4) 再展平
-            base_q_exp = base_q.unsqueeze(1).expand(N, K, 4).reshape(N*K, 4)  # (N*K,4)
-            base_q_inv = quat_conjugate(base_q_exp.reshape(N, K, 4))  # (N*K,4)
-
             # --- 1) link pos & vel world → local ---
             world_key_body_pose = self.rigid_body_states[:, self.key_point_indices, 0:3]   # (N,K,3)
-            world_key_body_vel = self.rigid_body_states[:, self.key_point_indices, 7:10]  # (N,K,3)
-            world_key_body_quat = self.rigid_body_states[:, self.key_point_indices, 3:7]  # (N,K,4)
 
             local_key_body_pos = world_key_body_pose - self.root_states[:, 0:3].unsqueeze(1)  # (N,K,3)
-            local_key_body_vel = world_key_body_vel - self.root_states[:, 7:10].unsqueeze(1)  # (N,K,3)
-            local_link_quat = quat_mul(base_q_inv, world_key_body_quat) # (N,K,4) 
-
-            # 展平
-            flat_end_pos = local_key_body_pos.view(N*K, 3)            # (N*K,3)
-            flat_end_vel = local_key_body_vel.view(N*K, 3)            # (N*K,3)
+            local_key_body_pos = local_key_body_pos.view(N, K*3)
             
-
-            # 逆旋转到本地
-            local_end_pos = quat_rotate_inverse(base_q_exp, flat_end_pos)  # (N*K,3)
-            local_end_vel = quat_rotate_inverse(base_q_exp, flat_end_vel)  # (N*K,3)
-
-            # 再恢复 (N, K*3)
-            flat_local_key_pos = local_end_pos.view(N, K*3)
-            flat_local_link_quat = local_link_quat.reshape(N, K * 4)  # (N,K*4)
-
-            return torch.cat((joint_pos, base_lin_vel, base_ang_vel, joint_vel, flat_local_key_pos, flat_local_link_quat, z_pos), dim=-1)
+            return torch.cat((joint_pos, base_lin_vel, base_ang_vel, joint_vel, local_key_body_pos, z_pos), dim=-1)
+            # return torch.cat((joint_pos, base_lin_vel, base_ang_vel, joint_vel, flat_local_key_pos, flat_local_link_quat, z_pos), dim=-1)
+            return torch.cat((joint_pos, base_lin_vel, base_ang_vel, joint_vel, z_pos), dim=-1)
         elif self.cfg.env.data_type == 'cartesian' or self.cfg.env.data_type == 'joints_and_cartesian':
             N = self.num_envs
             K = len(self.cartesian_data_link_indices)
@@ -408,26 +380,14 @@ class G1LeggedRobot(BaseTask):
 
             # --- 1) link pos & vel world → local ---
             world_key_body_pose = self.rigid_body_states[:, self.cartesian_data_link_indices, 0:3]   # (N,K,3)
-            world_key_body_vel = self.rigid_body_states[:, self.cartesian_data_link_indices, 7:10]  # (N,K,3)
             world_key_body_quat = self.rigid_body_states[:, self.cartesian_data_link_indices, 3:7]  # (N,K,4)
 
             local_key_body_pos = world_key_body_pose - self.root_states[:, 0:3].unsqueeze(1)  # (N,K,3)
-            local_key_body_vel = world_key_body_vel - self.root_states[:, 7:10].unsqueeze(1)  # (N,K,3)
             local_link_quat = quat_mul(base_q_inv, world_key_body_quat) # (N,K,4) 
 
-            # 展平
-            flat_end_pos = local_key_body_pos.view(N*K, 3)            # (N*K,3)
-            flat_end_vel = local_key_body_vel.view(N*K, 3)            # (N*K,3)
-            
-
-            # 逆旋转到本地
-            local_end_pos = quat_rotate_inverse(base_q_exp, flat_end_pos)  # (N*K,3)
-            local_end_vel = quat_rotate_inverse(base_q_exp, flat_end_vel)  # (N*K,3)
-
             # 再恢复 (N, K*3)
-            flat_local_key_pos = local_end_pos.view(N, K*3)
-            flat_local_key_vel = local_end_vel.view(N, K*3)
             flat_local_link_quat = local_link_quat.reshape(N, K * 4)  # (N,K*4)
+            local_key_body_pos = local_key_body_pos.view(N, K*3)  # (N,K*3)
 
             # --- 2) 基座速度 world → local ---
             # alrewady in local frame
@@ -443,10 +403,9 @@ class G1LeggedRobot(BaseTask):
             if self.cfg.env.data_type == 'cartesian':
                 # concat
                 return torch.cat([
-                    flat_local_key_pos,                # (N, K*3)
+                    local_link_quat,                # (N, K*3)
                     base_lin_vel,      # (N,3)
                     base_ang_vel,      # (N,3)
-                    # flat_local_key_vel,           # (N, K*3)
                     flat_local_link_quat,          # (N, K*4)
                     z_pos                    # (N,1)
                 ], dim=-1)
@@ -456,8 +415,7 @@ class G1LeggedRobot(BaseTask):
                     base_lin_vel,      # (N,3)
                     base_ang_vel,      # (N,3)
                     joint_vel,         # (N, 21)
-                    flat_local_key_pos,                # (N, K*3)
-                    # flat_local_key_vel,           # (N, K*3)
+                    local_link_quat,                # (N, K*3)
                     flat_local_link_quat,          # (N, K*4)
                     z_pos                    # (N,1)
                 ], dim=-1)
@@ -1088,6 +1046,7 @@ class G1LeggedRobot(BaseTask):
 
         # save body names from the asset
         self.body_names = self.gym.get_asset_rigid_body_names(robot_asset)
+        print(f"Body names: {self.body_names}")
         self.dof_names = self.gym.get_asset_dof_names(robot_asset)
         self.num_bodies = len(self.body_names)
         self.num_dofs = len(self.dof_names)
@@ -1110,8 +1069,6 @@ class G1LeggedRobot(BaseTask):
         env_lower = gymapi.Vec3(0., 0., 0.)
         env_upper = gymapi.Vec3(0., 0., 0.)
         self.actor_handles = []
-        self.target_handles = [] # <--- 在循环前新建 handle 列表
-        target_sphere_asset = self.gym.create_sphere(self.sim, 0.01, gymapi.AssetOptions()) # 半径可改
         self.envs = []
         for i in range(self.num_envs):
             # create env instance
@@ -1222,12 +1179,18 @@ class G1LeggedRobot(BaseTask):
         self.gym.clear_lines(self.viewer)
 
         # 球半径、颜色可以自定义
-        sphere_geom = gymutil.WireframeSphereGeometry(0.07, 6, 6, None, color=(1, 0, 0))  # 红色
+        before_hit_sphere_geom = gymutil.WireframeSphereGeometry(0.07, 6, 6, None, color=(1, 0, 0))  # 红色
+        after_hit_sphere_geom = gymutil.WireframeSphereGeometry(0.07, 6, 6, None, color=(0, 1, 0))  # 绿色
         for i in range(self.num_envs):
             target_pos = (self.target_pos[i]).cpu().numpy()
             sphere_pose = gymapi.Transform()
             sphere_pose.p = gymapi.Vec3(*target_pos.tolist())
-            gymutil.draw_lines(sphere_geom, self.gym, self.viewer, self.envs[i], sphere_pose)
+            if not self.has_hit[i]:
+                # 如果还没有 hit，绘制红色球
+                gymutil.draw_lines(before_hit_sphere_geom, self.gym, self.viewer, self.envs[i], sphere_pose)
+            else:
+                # 如果已经 hit，绘制绿色球
+                gymutil.draw_lines(after_hit_sphere_geom, self.gym, self.viewer, self.envs[i], sphere_pose)
 
     def _init_height_points(self):
         """ Returns points at which the height measurments are sampled (in base frame)

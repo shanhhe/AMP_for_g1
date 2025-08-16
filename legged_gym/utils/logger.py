@@ -134,6 +134,7 @@ class Logger:
         if not os.path.exists(log_dir):
             os.makedirs(log_dir)
         fig.savefig(os.path.join(log_dir, f'{run_name}.png'), dpi=600, bbox_inches='tight')
+        print(f"Figure saved to {os.path.join(log_dir, f'{run_name}.png')}")
 
 
     def _plot_single_state(self, keys, run_name=None):
@@ -171,6 +172,7 @@ class Logger:
         if not os.path.exists(log_dir):
             os.makedirs(log_dir)
         fig.savefig(os.path.join(log_dir, f'{keys[0]}_{run_name}.png'), dpi=300, bbox_inches='tight')
+        print(f"Figure saved to {os.path.join(log_dir, f'{keys[0]}_{run_name}.png')}")
 
 
     def _plot_waist(self, run_name=None):
@@ -213,6 +215,7 @@ class Logger:
         if not os.path.exists(log_dir):
             os.makedirs(log_dir)
         fig.savefig(os.path.join(log_dir, f'{run_name}.png'), dpi=300, bbox_inches='tight')
+        print(f"Figure saved to {os.path.join(log_dir, f'{run_name}.png')}")
 
     def _plot(self, run_name=None):
         nb_rows = 3
@@ -280,7 +283,7 @@ class Logger:
         if not os.path.exists(log_dir):
             os.makedirs(log_dir)
         fig.savefig(os.path.join(log_dir, f'{run_name}.png'), dpi=300, bbox_inches='tight')
-        # plt.show()
+        print(f"Figure saved to {os.path.join(log_dir, f'{run_name}.png')}")
 
     def print_rewards(self):
         print("Average rewards per second:")

@@ -31,7 +31,7 @@ import glob
 
 from legged_gym.envs.base.g1_legged_robot_config import G1LeggedRobotCfg, G1LeggedRobotCfgPPO
 
-MOTION_FILES = glob.glob('datasets/joint_from_simulation/forward_1.0.csv')  # Replace with your actual path to the motion files
+MOTION_FILES = glob.glob('datasets/customed_g1/*')  # Replace with your actual path to the motion files
 CARTESIAN_MOTION_FILES = glob.glob('datasets/cartesian_with_orientation_from_simulation/forward_1.0.csv')  # Replace with your actual path to the motion files
 CARTESIAN_AND_JOINT_MOTION_FILES = glob.glob('datasets/joints_and_cartesian_from_simulation/forward_1.0.csv')
 
@@ -42,9 +42,7 @@ class G121AMPCfg( G1LeggedRobotCfg ):
         num_actions = 21
         num_envs = 4096
         include_history_steps = None  # Number of steps of history to include.
-        # 3 + 3 + 3 + 3 + 21 + 21 + 21 + 2 = 77
-        # num_observations = 74
-        # num_privileged_obs = 77
+        # 3 + 3 + 3 + 3 + 21 + 21 + 21 = 75
         num_observations = 72 #original amp
         num_privileged_obs = 75
         reference_state_initialization = True
@@ -57,6 +55,7 @@ class G121AMPCfg( G1LeggedRobotCfg ):
                               "left_shoulder_roll_link", "left_elbow_link", "left_rubber_hand",
                               "right_shoulder_roll_link", "right_elbow_link", "right_rubber_hand"]
         data_type = 'joint'  # 'cartesian' or 'joint' or 'joints_and_cartesian'
+        debug_viz = False
 
     class init_state( G1LeggedRobotCfg.init_state ):
         pos = [0.0, 0.0, 0.8] # x,y,z [m]
@@ -101,8 +100,6 @@ class G121AMPCfg( G1LeggedRobotCfg ):
                      'shoulder_roll': 60,
                      'shoulder_yaw': 20.,
                      'elbow': 60
-                    #  'ankle_pitch': 35,
-                    #  'ankle_roll': 30,
                      }  # [N*m/rad]
         damping = {  'hip_yaw': 2,
                      'hip_roll': 2,
@@ -116,10 +113,6 @@ class G121AMPCfg( G1LeggedRobotCfg ):
                      'shoulder_roll': 1,
                      'shoulder_yaw': 0.4,
                      'elbow': 1
- 
- 
-                    #  'ankle_pitch': 4,
-                    #  'ankle_roll': 2,
                      }  # [N*m/rad]  # [N*m*s/rad]
         # action scale: target angle = actionScale * action + defaultAngle
         action_scale = 0.25
@@ -172,45 +165,6 @@ class G121AMPCfg( G1LeggedRobotCfg ):
         soft_dof_pos_limit = 0.9
         base_height_target = 0.78
         class scales( G1LeggedRobotCfg.rewards.scales ):
-            # termination = 0.0
-            # tracking_lin_vel = 1.5 * 1. / (.005 * 6)
-            # tracking_ang_vel = 0.5 * 1. / (.005 * 6)
-            # lin_vel_z = 0.0
-            # ang_vel_xy = 0.0
-            # orientation = 0.0
-            # torques = 0.0
-            # dof_vel = 0.0
-            # dof_acc = 0.0
-            # base_height = 0.0 
-            # feet_air_time =  0.0
-            # collision = 0.0
-            # feet_stumble = 0.0
-            # action_rate = 0.0
-            # stand_still = 0.0
-            # dof_pos_limits = 0.0
-
-            # tracking_lin_vel = 1.5 * 1. / (.005 * 6)
-            # tracking_ang_vel = 0.5 * 1. / (.005 * 6)
-            # lin_vel_z = -2.0
-            # ang_vel_xy = -0.05
-            # orientation = -1.0
-            # base_height = -10.0
-            # dof_acc = -2.5e-7
-            # dof_vel = -1e-3
-            # feet_air_time = 0.0
-            # collision = -0.1
-            # action_rate = -0.01
-            # dof_pos_limits = -5.0
-            # alive = 0.15
-            # hip_pos = -1.0
-            # contact_no_vel = -0.2
-            # feet_swing_height = -20.0
-            # contact = 0.18
-            # straight_stance_phase = 2.0
-            # penalty_knee_hyperextension = 1.0
-            # stance_swing_coordination = 2.0
-            # swing_height = 0.5
-
             tracking_lin_vel = 8.0
             tracking_ang_vel = 5.0
             lin_vel_z = -2.0
@@ -238,13 +192,10 @@ class G121AMPCfg( G1LeggedRobotCfg ):
         linear_increasing_commands_for_play = False # if true: increase the linear velocity commands during play
         linear_decreasing_commands_for_play = False
         class ranges:
-            lin_vel_x = [-0.3, 1.2] # min max [m/s]
-            lin_vel_y = [-0.3, 0.3]   # min max [m/s]
-            ang_vel_yaw = [-0.3, 0.3]    # min max [rad/s]
+            lin_vel_x = [-1.0, 4.0] # min max [m/s]
+            lin_vel_y = [-0.8, 0.8]   # min max [m/s]
+            ang_vel_yaw = [-1.57, 1.57]    # min max [rad/s]
             heading = [-3.14, 3.14]
-
-    # class sim( G1LeggedRobotCfg.sim ):
-    #     dt = 0.005
 
 class G121AMPCfgPPO( G1LeggedRobotCfgPPO ):
     runner_class_name = 'G1AMPOnPolicyRunner'
@@ -296,15 +247,15 @@ class G121AMPCfgPPO( G1LeggedRobotCfgPPO ):
         #     mirror_loss_coeff = 0.0
 
     class runner( G1LeggedRobotCfgPPO.runner ):
-        run_name = 'init_amp_reward_coef0.6'
-        experiment_name = 'dance'
+        run_name = 'init'
+        experiment_name = 'walk'
         algorithm_class_name = 'AMPPPO'
         policy_class_name = 'ActorCritic'
         max_iterations = 50000 # number of policy updates
         empirical_normalization = True # whether to use empirical normalization of the observations
         save_interval = 100
 
-        amp_reward_coef = 0.6
+        amp_reward_coef = 0.2
         amp_motion_files = MOTION_FILES
         amp_cartesian_motion_files = CARTESIAN_MOTION_FILES
         amp_cartesian_and_joint_motion_files = CARTESIAN_AND_JOINT_MOTION_FILES

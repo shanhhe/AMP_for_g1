@@ -59,7 +59,6 @@ class AMPDiscriminator(nn.Module):
             if normalizer is not None:
                 state = normalizer.normalize_torch(state, self.device)
                 next_state = normalizer.normalize_torch(next_state, self.device)
-
             d = self.amp_linear(self.trunk(torch.cat([state, next_state], dim=-1)))
             amp_reward = self.amp_reward_coef * torch.clamp(1 - (1/4) * torch.square(d - 1), min=0)
             if self.task_reward_lerp > 0:

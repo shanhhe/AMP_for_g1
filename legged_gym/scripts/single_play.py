@@ -90,7 +90,7 @@ def play(args):
     env_cfg, train_cfg = task_registry.get_cfgs(name=args.task)
     # override some parameters for testing
     env_cfg.env.num_envs = min(env_cfg.env.num_envs, 1)
-    env_cfg.env.reference_state_initialization = True
+    env_cfg.env.reference_state_initialization = False
     env_cfg.terrain.num_rows = 1
     env_cfg.terrain.num_cols = 1
     env_cfg.terrain.curriculum = False
@@ -99,7 +99,7 @@ def play(args):
     env_cfg.domain_rand.push_robots = False
     env_cfg.domain_rand.randomize_gains = False
     env_cfg.domain_rand.randomize_base_mass = False
-    env_cfg.commands.ranges.lin_vel_x =  [0.1, 0.1]
+    env_cfg.commands.ranges.lin_vel_x =  [0.5, 0.5]
     env_cfg.commands.ranges.lin_vel_y = [0.0, 0.0]
     env_cfg.commands.ranges.ang_vel_yaw = [0.5, 0.5]
     env_cfg.commands.ranges.heading = [0.0, 0.0]
@@ -108,7 +108,7 @@ def play(args):
     # env_cfg.commands.linear_increasing_commands_for_play = True
     # env_cfg.commands.increasing_scale = 0.9
     # env_cfg.env.episode_length_s = 75
-    env_cfg.env.episode_length_s = 10
+    env_cfg.env.episode_length_s = 5
     
 
     train_cfg.runner.amp_num_preload_transitions = 10
@@ -178,7 +178,7 @@ def play(args):
         if FIXED_CAMERA:
             update_camera_position(env, robot_index, camera_offset)
         if i < stop_state_log:
-            upper_body_ang_vel_sum, pelvis_ang_vel, waist_ang_vel, torso_ang_vel = _extract_upper_body_angular_velocity(env)
+            # upper_body_ang_vel_sum, pelvis_ang_vel, waist_ang_vel, torso_ang_vel = _extract_upper_body_angular_velocity(env)
             logger.log_states(
                 {
                     'dof_pos_target': actions[robot_index, joint_index].item() * env.cfg.control.action_scale,
@@ -201,15 +201,15 @@ def play(args):
                     'projected_gravity_x': env.projected_gravity[robot_index, 0].item(),
                     'projected_gravity_y': env.projected_gravity[robot_index, 1].item(),
                     'projected_gravity_z': env.projected_gravity[robot_index, 2].item(),
-                    'plevis_ang_vel_roll': pelvis_ang_vel[:, 0].item(),
-                    'plevis_ang_vel_pitch': pelvis_ang_vel[:, 1].item(),
-                    'plevis_ang_vel_yaw': pelvis_ang_vel[:, 2].item(),
-                    'waist_ang_vel_roll': waist_ang_vel[:, 0].item(),
-                    'waist_ang_vel_pitch': waist_ang_vel[:, 1].item(),
-                    'waist_ang_vel_yaw': waist_ang_vel[:, 2].item(),
-                    'torso_ang_vel_roll': torso_ang_vel[:, 0].item(),
-                    'torso_ang_vel_pitch': torso_ang_vel[:, 1].item(),
-                    'torso_ang_vel_yaw': torso_ang_vel[:, 2].item(),
+                    # 'plevis_ang_vel_roll': pelvis_ang_vel[:, 0].item(),
+                    # 'plevis_ang_vel_pitch': pelvis_ang_vel[:, 1].item(),
+                    # 'plevis_ang_vel_yaw': pelvis_ang_vel[:, 2].item(),
+                    # 'waist_ang_vel_roll': waist_ang_vel[:, 0].item(),
+                    # 'waist_ang_vel_pitch': waist_ang_vel[:, 1].item(),
+                    # 'waist_ang_vel_yaw': waist_ang_vel[:, 2].item(),
+                    # 'torso_ang_vel_roll': torso_ang_vel[:, 0].item(),
+                    # 'torso_ang_vel_pitch': torso_ang_vel[:, 1].item(),
+                    # 'torso_ang_vel_yaw': torso_ang_vel[:, 2].item(),
                     'left_hip_pitch_joint': env.dof_pos[robot_index, env.dof_names.index("left_hip_pitch_joint")].item(),
                     'right_hip_pitch_joint': env.dof_pos[robot_index, env.dof_names.index("right_hip_pitch_joint")].item(),
                     'left_hip_roll_joint': env.dof_pos[robot_index, env.dof_names.index("left_hip_roll_joint")].item(),
@@ -239,7 +239,7 @@ def play(args):
         elif i==stop_state_log and args.plot_states:
                 # logger.plot_waist_states(run_name=args.load_run)
                 # logger.plot_states(run_name=args.load_run)
-                logger.plot_single_state(key=['left_hip_pitch_joint', 'left_hip_roll_joint', 'left_hip_yaw_joint'], run_name=args.load_run)
+                logger.plot_single_state(key=['left_wrist_pitch_joint', 'left_wrist_roll_joint', 'left_wrist_yaw_joint'], run_name=args.load_run)
                 # logger.plot_contact_phase(run_name=args.load_run)
                 print("Plotted states.")
         if  0 < i < stop_rew_log:
@@ -258,6 +258,6 @@ if __name__ == '__main__':
     MOVE_CAMERA = False
     FIXED_CAMERA = True
     args = get_args()
-    args.plot_states = False  # Set to True to plot states
+    args.plot_states = True  # Set to True to plot states
     args.real_time_factor = 1.0  # Set to 0 for no real-time factor
     play(args)

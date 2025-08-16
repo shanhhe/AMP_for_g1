@@ -467,6 +467,12 @@ class AMPLoader:
 
     def get_joint_vel_batch(self, poses):
         return poses[:, self.JOINT_VEL_START_IDX:self.JOINT_VEL_END_IDX]
+    
+    def get_key_pos_batch(self, poses):
+        return poses[:, self.KEY_POINT_POS_START_IDX:self.KEY_POINT_POS_END_IDX]
+    
+    def get_key_quat_batch(self, poses):
+        return poses[:, self.KEY_POINT_QUAT_START_IDX:self.KEY_POINT_QUAT_END_IDX]
 
     def weighted_traj_idx_sample(self):
         """Get traj idx via weighted sampling."""
@@ -601,11 +607,11 @@ class AMPLoader:
             all_frame_joint_vel_ends[traj_mask] = self.get_joint_vel_batch(trajectory[idx_high[traj_mask]])
 
             # Extract key point positions and orientations
-            all_frame_key_pos_starts[traj_mask] = trajectory[idx_low[traj_mask], self.KEY_POINT_POS_START_IDX:self.KEY_POINT_POS_END_IDX]
-            all_frame_key_pos_ends[traj_mask] = trajectory[idx_high[traj_mask], self.KEY_POINT_POS_START_IDX:self.KEY_POINT_POS_END_IDX]
-            
-            all_frame_key_quat_starts[traj_mask] = trajectory[idx_low[traj_mask], self.KEY_POINT_QUAT_START_IDX:self.KEY_POINT_QUAT_END_IDX]
-            all_frame_key_quat_ends[traj_mask] = trajectory[idx_high[traj_mask], self.KEY_POINT_QUAT_START_IDX:self.KEY_POINT_QUAT_END_IDX]
+            all_frame_key_pos_starts[traj_mask] = self.get_key_pos_batch(trajectory[idx_low[traj_mask]])
+            all_frame_key_pos_ends[traj_mask] = self.get_key_pos_batch(trajectory[idx_high[traj_mask]])
+
+            all_frame_key_quat_starts[traj_mask] = self.get_key_quat_batch(trajectory[idx_low[traj_mask]])
+            all_frame_key_quat_ends[traj_mask] = self.get_key_quat_batch(trajectory[idx_high[traj_mask]])
 
         
         blend = torch.tensor(p * n - idx_low, device=self.device, dtype=torch.float32).unsqueeze(-1)
@@ -625,31 +631,18 @@ class AMPLoader:
 
         # Key point positions and orientations
         key_pos_blend = self.slerp(all_frame_key_pos_starts, all_frame_key_pos_ends, blend)
-        key_quat_blend = self.slerp(all_frame_key_quat_starts, all_frame_key_quat_ends, blend)
+        key_quat_blend = utils.quaternion_slerp(all_frame_key_quat_starts, all_frame_key_quat_ends, blend)
         
-        if self.datatype == "Cartesian":
-            # Combine all components
-            return torch.cat([
-                pos_blend, 
-                rot_blend,
-                joint_blend,
-                lin_vel_blend, 
-                ang_vel_blend, 
-                joint_vel_blend,
-                key_pos_blend,
-                key_quat_blend
-            ], dim=-1)
-        else:
-            return torch.cat([
-                pos_blend,
-                rot_blend,
-                joint_blend,
-                lin_vel_blend,
-                ang_vel_blend,
-                joint_vel_blend,
-                key_pos_blend,
-                key_quat_blend
-            ], dim=-1)
+        return torch.cat([
+            pos_blend, 
+            rot_blend,
+            joint_blend,
+            lin_vel_blend, 
+            ang_vel_blend, 
+            joint_vel_blend,
+            key_pos_blend,
+            key_quat_blend
+        ], dim=-1)
 
     def get_frame(self):
         """Returns random frame."""
@@ -739,7 +732,7 @@ class AMPLoader:
                     self.preloaded_s.shape[0], size=mini_batch_size)
                 
                 # Get only the joint positions for the state
-                s = self.preloaded_s[idxs, self.JOINT_POS_START_IDX:]
+                s = self.preloaded_s[idxs, self.JOINT_POS_START_IDX:self.KEY_POINT_POS_END_IDX]
 
                 # Add root height (Z coordinate)
                 s = torch.cat([
@@ -747,7 +740,7 @@ class AMPLoader:
                     self.preloaded_s[idxs, self.ROOT_POS_START_IDX + 2:self.ROOT_POS_START_IDX + 3]], dim=-1)
                 
                 # Same for next state
-                s_next = self.preloaded_s_next[idxs, self.JOINT_POS_START_IDX:]
+                s_next = self.preloaded_s_next[idxs, self.JOINT_POS_START_IDX:self.KEY_POINT_POS_END_IDX]
                 s_next = torch.cat([
                     s_next,
                     self.preloaded_s_next[idxs, self.ROOT_POS_START_IDX + 2:self.ROOT_POS_START_IDX + 3]], dim=-1)
@@ -787,4 +780,6 @@ class AMPLoader:
     @property
     def observation_dim(self):
         """Size of AMP observations."""
-        return self.extended_traj[0].shape[1] + 1 # Joint positions + lin_vel + ang_vel+ root height
+        # return self.extended_traj[0].shape[1] + 1
+        return self.extended_traj[0].shape[1] + 1 - self.KEY_POINT_QUAT_SIZE# Joint positions + lin_vel + ang_vel+ root height
+        # return self.extended_traj[0].shape[1] + 1 - self.KEY_POINT_QUAT_SIZE  -self.KEY_POINT_POS_SIZE# Joint positions + root height
